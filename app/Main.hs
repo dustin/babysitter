@@ -6,15 +6,16 @@ module Main where
 import           Control.Monad              (void)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
+import           Data.Maybe                 (fromJust)
 import           Data.Semigroup             ((<>))
 import           Data.Text                  (Text, pack, unpack)
 import           Network.API.Pushover
 import           Network.MQTT.Client
-import           Options.Applicative        (Parser, auto, execParser, fullDesc,
-                                             help, helper, info, long,
-                                             maybeReader, option, progDesc,
-                                             showDefault, strOption, value,
-                                             (<**>))
+import           Network.URI
+import           Options.Applicative        (Parser, execParser, fullDesc, help,
+                                             helper, info, long, maybeReader,
+                                             option, progDesc, showDefault,
+                                             strOption, value, (<**>))
 import           System.Log.Logger          (Priority (INFO), infoM,
                                              rootLoggerName, setLevel,
                                              updateGlobalLogger)
@@ -23,11 +24,7 @@ import           System.Log.Logger          (Priority (INFO), infoM,
 import           Babysitter
 
 data Options = Options {
-  optMQTTHost        :: String
-  , optMQTTPort      :: Int
-  , optMQTTConnID    :: String
-  , optMQTTUsername  :: Maybe String
-  , optMQTTPassword  :: Maybe String
+  optMQTTURL         :: URI
   , optMQTTLWTTopic  :: Maybe Text
   , optMQTTLWTMsg    :: Maybe BL.ByteString
   , optPushoverToken :: Text
@@ -36,11 +33,7 @@ data Options = Options {
 
 options :: Parser Options
 options = Options
-  <$> strOption (long "mqtt-host" <> showDefault <> value "test.mosquitto.org" <> help "mqtt broker address")
-  <*> option auto (long "mqtt-port" <> showDefault <> value 8883 <> help "mqtt broker port")
-  <*> strOption (long "mqtt-connid" <> showDefault <> value "babysitter" <> help "mqtt connection ID")
-  <*> option ms (long "mqtt-username" <> showDefault <> value Nothing <> help "mqtt username")
-  <*> option ms (long "mqtt-password" <> showDefault <> value Nothing <> help "mqtt password")
+  <$> option (maybeReader $ parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://test.mosquitto.org/#babysitter") <> help "mqtt broker URI")
   <*> option mt (long "mqtt-lwt-topic" <> showDefault <> value Nothing <> help "mqtt last will topic")
   <*> option mb (long "mqtt-lwt-msg" <> showDefault <> value Nothing <> help "mqtt last will message")
   <*> strOption (long "pushover-token" <> showDefault <> value "" <> help "pushover token")
@@ -48,7 +41,6 @@ options = Options
 
   where
     mt = maybeReader $ pure.pure.pack
-    ms = maybeReader $ pure.pure
     mb = maybeReader $ pure.pure . BC.pack
 
 timedout :: Options -> Text -> Event -> Text -> IO ()
@@ -71,6 +63,35 @@ timedout Options{..} site ev topic = do
         void $ sendMessage m
       to _ = pure ()
 
+connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (Text -> BL.ByteString -> IO ()) -> IO MQTTClient
+connectMQTT uri lwtTopic lwtMsg f = do
+  let cf = case uriScheme uri of
+             "mqtt:"  -> runClient
+             "mqtts:" -> runClientTLS
+             us       -> fail $ "invalid URI scheme: " <> us
+
+      (Just a) = uriAuthority uri
+      (u,p) = up (uriUserInfo a)
+
+  cf mqttConfig{_hostname=uriRegName a, _port=port (uriPort a) (uriScheme uri), _connID=cid (uriFragment uri),
+                _cleanSession=False,
+                _username=u, _password=p,
+                _lwt=mkLWT <$> lwtTopic <*> lwtMsg <*> Just False,
+                _msgCB=Just $ f}
+
+  where
+    port "" "mqtt:"  = 1883
+    port "" "mqtts:" = 8883
+    port x _         = read x
+
+    cid ('#':[]) = "babysitter"
+    cid ('#':xs) = xs
+    cid _        = "babysitter"
+
+    up "" = (Nothing, Nothing)
+    up x = let (u,r) = break (== ':') (init x) in
+             (Just (unEscapeString u), if r == "" then Nothing else Just (unEscapeString $ tail r))
+
 run :: Options -> IO ()
 run o@Options{..} = do
   let things = [("oro/#", (minutes 15, timedout o "oro")),
@@ -78,11 +99,7 @@ run o@Options{..} = do
 
   wd <- mkWatchDogs (topicMatch (minutes 60, timedout o "def") things)
 
-  mc <- runClientTLS mqttConfig{_hostname=optMQTTHost, _port=optMQTTPort, _connID=optMQTTConnID,
-                                _cleanSession=False,
-                                _username=optMQTTUsername, _password=optMQTTPassword,
-                                _lwt=mkLWT <$> optMQTTLWTTopic <*> optMQTTLWTMsg <*> Just False,
-                                _msgCB=Just $ const . feed wd}
+  mc <- connectMQTT optMQTTURL optMQTTLWTTopic optMQTTLWTMsg (const . feed wd)
 
   -- Probably want to verify these...
   _ <- subscribe mc [(t,QoS2) | (t,_) <- things]
