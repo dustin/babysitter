@@ -1,0 +1,64 @@
+name:                babysitter
+version:             0.1.0.0
+github:              "dustin/babysitter"
+license:             BSD3
+author:              "Dustin Sallings"
+maintainer:          "dustin@spy.net"
+copyright:           "MIT"
+
+extra-source-files:
+- README.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/dustin/babysitter#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- stm
+- optparse-applicative
+- megaparsec
+- text
+- pushover-hs
+- net-mqtt
+- containers
+- async
+- bytestring
+
+library:
+  source-dirs: src
+  ghc-options:
+  - -Wall
+
+executables:
+  babysitter:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -Wall
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - babysitter
+    - hslogger
+
+tests:
+  babysitter-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - babysitter
+    - QuickCheck
+    - tasty
+    - tasty-hunit
+    - tasty-quickcheck
