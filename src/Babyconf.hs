@@ -11,7 +11,7 @@ import qualified Data.Map.Strict            as Map
 import           Data.Text                  (Text, pack)
 import           Data.Void                  (Void)
 import           Text.Megaparsec            (Parsec, between, eof, noneOf,
-                                             option, parse, sepBy, some)
+                                             option, parse, sepBy, some, try)
 import           Text.Megaparsec.Char       (alphaNumChar, space, space1)
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Text.Megaparsec.Error      (errorBundlePretty)
@@ -44,7 +44,7 @@ parseSource = do
       _ <- "src" *> space
       ustr <- some (noneOf ['\n', ' '])
       let (Just u) = parseURI ustr
-      (lwtt,lwtm) <- option (Nothing, Nothing) plwt
+      (lwtt,lwtm) <- option (Nothing, Nothing) (try plwt)
       pure (u, lwtt, lwtm)
 
     watch = do
