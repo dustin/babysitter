@@ -75,7 +75,7 @@ connectMQTT uri lwtTopic lwtMsg f = do
       (u,p) = up (uriUserInfo a)
 
   cf mqttConfig{_hostname=uriRegName a, _port=port (uriPort a) (uriScheme uri), _connID=cid (uriFragment uri),
-                _cleanSession=False,
+                _cleanSession=True,
                 _username=u, _password=p,
                 _lwt=mkLWT <$> lwtTopic <*> lwtMsg <*> Just False,
                 _msgCB=Just $ f}
