@@ -3,9 +3,11 @@
 
 module Main where
 
+import           Control.Concurrent.Async   (mapConcurrently_)
 import           Control.Monad              (void)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
+import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
 import           Data.Semigroup             ((<>))
 import           Data.Text                  (Text, pack, unpack)
@@ -21,6 +23,7 @@ import           System.Log.Logger          (Priority (INFO), infoM,
                                              updateGlobalLogger)
 
 
+import           Babyconf
 import           Babysitter
 
 data Options = Options {
@@ -29,6 +32,7 @@ data Options = Options {
   , optMQTTLWTMsg    :: Maybe BL.ByteString
   , optPushoverToken :: Text
   , optPushoverUser  :: Text
+  , optConfFile      :: String
   }
 
 options :: Parser Options
@@ -38,29 +42,26 @@ options = Options
   <*> option mb (long "mqtt-lwt-msg" <> showDefault <> value Nothing <> help "mqtt last will message")
   <*> strOption (long "pushover-token" <> showDefault <> value "" <> help "pushover token")
   <*> strOption (long "pushover-user" <> showDefault <> value "" <> help "pushover user")
+  <*> strOption (long "conf" <> showDefault <> value "baby.conf" <> help "config file")
 
   where
     mt = maybeReader $ pure.pure.pack
     mb = maybeReader $ pure.pure . BC.pack
 
-timedout :: Options -> Text -> Event -> Text -> IO ()
-timedout Options{..} site ev topic = do
-  infoM (unpack site) $ unpack topic <> " - " <> show ev
+timedout :: Text -> [Text] -> Event -> Text -> IO ()
+timedout tok users ev topic = do
+  infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> " <> show users
   to ev
 
     where
       to TimedOut = do
-        let tok = optPushoverToken
-            usr = optPushoverUser
-            m = (message tok usr (topic <> " timed out"))
-                {_title="Babysitter:  Timed Out"}
-        void $ sendMessage m
+        mapM_ (\usr -> let m = (message tok usr (topic <> " timed out"))
+                               {_title="Babysitter:  Timed Out"} in
+                         void $ sendMessage m) users
       to Returned = do
-        let tok = optPushoverToken
-            usr = optPushoverUser
-            m = (message tok usr (topic <> " came back"))
-                {_title="Babysitter:  Came Back"}
-        void $ sendMessage m
+        mapM_ (\usr -> let m = (message tok usr (topic <> " came back"))
+                               {_title="Babysitter:  Came Back"} in
+                         void $ sendMessage m) users
       to _ = pure ()
 
 connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (Text -> BL.ByteString -> IO ()) -> IO MQTTClient
@@ -92,20 +93,18 @@ connectMQTT uri lwtTopic lwtMsg f = do
     up x = let (u,r) = break (== ':') (init x) in
              (Just (unEscapeString u), if r == "" then Nothing else Just (unEscapeString $ tail r))
 
-run :: Options -> IO ()
-run o@Options{..} = do
-  let things = [("oro/#", (minutes 15, timedout o "oro")),
-                ("sj/#", (minutes 5, timedout o "sj"))]
-
-  wd <- mkWatchDogs (topicMatch (minutes 60, timedout o "def") things)
-
-  mc <- connectMQTT optMQTTURL optMQTTLWTTopic optMQTTLWTMsg (const . feed wd)
-
-  -- Probably want to verify these...
+runWatcher :: PushoverConf -> Source -> IO ()
+runWatcher (PushoverConf tok umap) (Source (u,mlwtt,mlwtm) watches) = do
+  let things = map (\(Watch t i dests) -> (t, (i, timedout tok (map (umap Map.!) dests)))) watches
+  wd <- mkWatchDogs (topicMatch (minutes 60, timedout tok []) things)
+  mc <- connectMQTT u mlwtt mlwtm (const . feed wd)
   _ <- subscribe mc [(t,QoS2) | (t,_) <- things]
-
   print =<< waitForClient mc
 
+run :: Options -> IO ()
+run Options{..} = do
+  (Babyconf dests srcs) <- parseConfFile optConfFile
+  mapConcurrently_ (runWatcher dests) srcs
 
 main :: IO ()
 main = do
