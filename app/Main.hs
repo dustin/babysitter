@@ -98,7 +98,9 @@ runWatcher (PushoverConf tok umap) (Source (u,mlwtt,mlwtm) watches) = do
   let things = map (\(Watch t i dests) -> (t, (i, timedout tok (map (umap Map.!) dests)))) watches
   wd <- mkWatchDogs (topicMatch (minutes 60, timedout tok []) things)
   mc <- connectMQTT u mlwtt mlwtm (const . feed wd)
-  _ <- subscribe mc [(t,QoS2) | (t,_) <- things]
+  infoM rootLoggerName $ "Subscribing at " <> show u <> " - " <> show [(t,QoS2) | (t,_) <- things]
+  subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
+  infoM rootLoggerName $ "Responded: " <> show subrv
   print =<< waitForClient mc
 
 run :: Options -> IO ()
