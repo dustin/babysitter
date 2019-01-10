@@ -48,8 +48,8 @@ options = Options
     mt = maybeReader $ pure.pure.pack
     mb = maybeReader $ pure.pure . BC.pack
 
-timedout :: Text -> [Text] -> Event -> Text -> IO ()
-timedout tok users ev topic = do
+timedout :: PushoverConf -> [Text] -> Event -> Text -> IO ()
+timedout (PushoverConf tok umap) users ev topic = do
   infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> " <> show users
   to ev
 
@@ -57,12 +57,14 @@ timedout tok users ev topic = do
       to TimedOut = do
         mapM_ (\usr -> let m = (message tok usr (topic <> " timed out"))
                                {_title="Babysitter:  Timed Out"} in
-                         void $ sendMessage m) users
+                         void $ sendMessage m) users'
       to Returned = do
         mapM_ (\usr -> let m = (message tok usr (topic <> " came back"))
                                {_title="Babysitter:  Came Back"} in
-                         void $ sendMessage m) users
+                         void $ sendMessage m) users'
       to _ = pure ()
+
+      users' = map (umap Map.!) users
 
 connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (Text -> BL.ByteString -> IO ()) -> IO MQTTClient
 connectMQTT uri lwtTopic lwtMsg f = do
@@ -94,9 +96,9 @@ connectMQTT uri lwtTopic lwtMsg f = do
              (Just (unEscapeString u), if r == "" then Nothing else Just (unEscapeString $ tail r))
 
 runWatcher :: PushoverConf -> Source -> IO ()
-runWatcher (PushoverConf tok umap) (Source (u,mlwtt,mlwtm) watches) = do
-  let things = map (\(Watch t i dests) -> (t, (i, timedout tok (map (umap Map.!) dests)))) watches
-  wd <- mkWatchDogs (topicMatch (minutes 60, timedout tok []) things)
+runWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
+  let things = map (\(Watch t i dests) -> (t, (i, timedout pc dests))) watches
+  wd <- mkWatchDogs (topicMatch (minutes 60, timedout pc []) things)
   mc <- connectMQTT u mlwtt mlwtm (const . feed wd)
   infoM rootLoggerName $ "Subscribing at " <> show u <> " - " <> show [(t,QoS2) | (t,_) <- things]
   subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
