@@ -48,8 +48,15 @@ options = Options
     mt = maybeReader $ pure.pure.pack
     mb = maybeReader $ pure.pure . BC.pack
 
-timedout :: PushoverConf -> [Text] -> Event -> Text -> IO ()
-timedout (PushoverConf tok umap) users ev topic = do
+timedout :: PushoverConf -> Action -> MQTTClient -> Event -> Text -> IO ()
+timedout _ (ActSet t m r) mc ev topic = do
+  infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> set " <> unpack t
+  to ev
+    where
+      to TimedOut = publishq mc t m r QoS2
+      to _        = pure ()
+
+timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
   infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> " <> show users
   to ev
 
@@ -66,7 +73,7 @@ timedout (PushoverConf tok umap) users ev topic = do
 
       users' = map (umap Map.!) users
 
-connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (Text -> BL.ByteString -> IO ()) -> IO MQTTClient
+connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> IO ()) -> IO MQTTClient
 connectMQTT uri lwtTopic lwtMsg f = do
   let cf = case uriScheme uri of
              "mqtt:"  -> runClient
@@ -97,9 +104,9 @@ connectMQTT uri lwtTopic lwtMsg f = do
 
 runWatcher :: PushoverConf -> Source -> IO ()
 runWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
-  let things = map (\(Watch t i dests) -> (t, (i, timedout pc dests))) watches
-  wd <- mkWatchDogs (topicMatch (minutes 60, timedout pc []) things)
-  mc <- connectMQTT u mlwtt mlwtm (const . feed wd)
+  let things = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
+  wd <- mkWatchDogs (topicMatch (minutes 60, undefined) things)
+  mc <- connectMQTT u mlwtt mlwtm (\c t _ -> feed wd t c)
   infoM rootLoggerName $ "Subscribing at " <> show u <> " - " <> show [(t,QoS2) | (t,_) <- things]
   subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
   infoM rootLoggerName $ "Responded: " <> show subrv

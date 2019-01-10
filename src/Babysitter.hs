@@ -20,27 +20,27 @@ import qualified Data.Set                 as Set
 import           Data.Text                (Text, dropEnd, dropWhileEnd)
 import           System.Timeout           (timeout)
 
-type AlertFun a = Event -> a -> IO ()
+type AlertFun a b = b -> Event -> a -> IO ()
 
-type Watchers a = Map a (Async (), TChan (), AlertFun a)
+type Watchers a b = Map a (Async (), TChan (), AlertFun a b)
 
-type State a = TVar (Watchers a)
+type State a b = TVar (Watchers a b)
 
-data (Ord a, Eq a) => WatchDogs a = WatchDogs {
-  _cfgFor :: a -> (Int, AlertFun a)
-  , _st   :: State a
+data (Ord a, Eq a) => WatchDogs a b = WatchDogs {
+  _cfgFor :: a -> (Int, AlertFun a b)
+  , _st   :: State a b
   , _seen :: TVar (Set a)
   }
 
 data Event = Created | Returned | TimedOut deriving (Eq, Show)
 
-mkWatchDogs :: (Ord a, Eq a) => (a -> (Int, AlertFun a)) -> IO (WatchDogs a)
+mkWatchDogs :: (Ord a, Eq a) => (a -> (Int, AlertFun a b)) -> IO (WatchDogs a b)
 mkWatchDogs _cfgFor = do
   _st <- newTVarIO mempty
   _seen <- newTVarIO mempty
   pure WatchDogs{..}
 
-heel :: Ord a => WatchDogs a -> IO ()
+heel :: Ord a => WatchDogs a b -> IO ()
 heel WatchDogs{..} = do
   m <- atomically $ do
     m <- readTVar _st
@@ -49,8 +49,8 @@ heel WatchDogs{..} = do
     pure m
   mapM_ (\(a,_,_) -> cancel a) $ Map.elems m
 
-feed :: (Ord a, Eq a) => WatchDogs a -> a -> IO ()
-feed WatchDogs{..} t = do
+feed :: (Ord a, Eq a) => WatchDogs a b -> a -> b -> IO ()
+feed WatchDogs{..} t a = do
   m <- readTVarIO _st
   case Map.lookup t m of
     Nothing       -> startWatcher
@@ -60,11 +60,11 @@ feed WatchDogs{..} t = do
     startWatcher :: IO ()
     startWatcher = do
       let (i, f) = _cfgFor t
-      nevent >>= \ev -> f ev t
+      nevent >>= \ev -> f a ev t
       ch <- newTChanIO
-      a <- async $ watch ch i f
+      ws <- async $ watch ch i f
       atomically $ do
-        modifyTVar' _st (Map.insert t (a,ch,f))
+        modifyTVar' _st (Map.insert t (ws,ch,f))
         modifyTVar' _seen (Set.insert t)
 
     nevent = readTVarIO _seen >>= \s -> if Set.member t s then pure Returned else pure Created
@@ -72,7 +72,7 @@ feed WatchDogs{..} t = do
     watch ch i f = do
         r <- timeout i w
         case r of
-          Nothing -> f TimedOut t >> unmap
+          Nothing -> f a TimedOut t >> unmap
           Just _  -> watch ch i f
 
           where w = atomically . readTChan $ ch

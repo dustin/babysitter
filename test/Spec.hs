@@ -6,6 +6,7 @@ import           Control.Concurrent.STM (TChan, TVar, atomically, modifyTVar',
                                          readTChan, readTVar, readTVarIO, retry,
                                          writeTChan, writeTVar)
 import           Control.Monad          (foldM_)
+import           Data.Void              (Void)
 
 import           Test.QuickCheck
 import           Test.Tasty
@@ -25,33 +26,33 @@ testWatchDoggin = do
   x <- newTVarIO []
   let keys = "abcdefg" :: String
   wd <- mkWatchDogs (const (millis 100, tod x))
-  foldM_ (\_ k -> feed wd k) undefined keys
-  foldM_ (\_ k -> feed wd k >> threadDelay (millis 5)) undefined keys
+  foldM_ (\_ k -> feed wd k ()) undefined keys
+  foldM_ (\_ k -> feed wd k () >> threadDelay (millis 5)) undefined keys
   l <- atomically $ do
     l <- readTVar x
     if length l < length keys then retry else pure l
   assertEqual "" keys (reverse l)
 
   where
-    tod :: TVar [Char] -> AlertFun Char
-    tod x TimedOut t = (atomically $ modifyTVar' x (t:))
-    tod _ e t        = pure ()
+    tod :: TVar [Char] -> AlertFun Char ()
+    tod x _ TimedOut t = (atomically $ modifyTVar' x (t:))
+    tod _ _ e t        = pure ()
 
 testHeelin :: Assertion
 testHeelin = do
   x <- newTVarIO 0
   let keys = "abcdefg" :: String
   wd <- mkWatchDogs (const (millis 5, tod x))
-  foldM_ (\_ k -> feed wd k) undefined keys
+  foldM_ (\_ k -> feed wd k ()) undefined keys
   heel wd
   threadDelay (millis 50) -- enough time for something to surey have fired
   r <- readTVarIO x
   assertEqual "" 0 r
 
   where
-    tod :: TVar Int -> AlertFun Char
-    tod x TimedOut t = (atomically $ modifyTVar' x succ)
-    tod _ e t        = pure ()
+    tod :: TVar Int -> AlertFun Char ()
+    tod x _ TimedOut t = (atomically $ modifyTVar' x succ)
+    tod _ _ e t        = pure ()
 
 testReturn :: Assertion
 testReturn = do
@@ -59,20 +60,20 @@ testReturn = do
   tv <- newTVarIO 0
   let keys = "abcdefg" :: String
   wd <- mkWatchDogs (const (millis 5, tod tv rv))
-  foldM_ (\_ k -> feed wd k) undefined keys
+  foldM_ (\_ k -> feed wd k ()) undefined keys
   -- Wait for some timeouts
   atomically $ readTVar tv >>= \r -> if r == 0 then retry else pure ()
   -- Bring stuff back
-  foldM_ (\_ k -> feed wd k) undefined keys
+  foldM_ (\_ k -> feed wd k ()) undefined keys
   -- Wait for something to come back.
   atomically $ readTVar rv >>= \r -> if r == 0 then retry else pure ()
   pure ()
 
   where
-    tod :: TVar Int -> TVar Int -> AlertFun Char
-    tod tv _ TimedOut t = (atomically $ modifyTVar' tv succ)
-    tod _ rv Returned t = (atomically $ modifyTVar' rv succ)
-    tod _ _ e t         = pure ()
+    tod :: TVar Int -> TVar Int -> AlertFun Char ()
+    tod tv _ _ TimedOut t = (atomically $ modifyTVar' tv succ)
+    tod _ rv _ Returned t = (atomically $ modifyTVar' rv succ)
+    tod _ _ _ e t         = pure ()
 
 
 tests :: [TestTree]

@@ -1,11 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
 
-module Babyconf (parseConfFile, Babyconf(..), Source(..), Watch(..), PushoverConf(..)) where
+module Babyconf (parseConfFile, Babyconf(..), Source(..), Watch(..), Action(..), PushoverConf(..)) where
 
 import           Control.Applicative        (empty, (<|>))
 import qualified Data.ByteString.Lazy       as BL
-import qualified Data.ByteString.Lazy.Char8 as BC
+import qualified Data.ByteString.Lazy.UTF8  as BU
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.Text                  (Text, pack)
@@ -24,7 +24,11 @@ data Babyconf = Babyconf PushoverConf [Source] deriving(Show)
 
 data Source = Source (URI, (Maybe Text), (Maybe BL.ByteString)) [Watch] deriving(Show)
 
-data Watch = Watch Text Int [Text] deriving(Show)
+data Action = ActAlert [Text]
+            | ActSet Text BL.ByteString Bool
+            deriving (Show)
+
+data Watch = Watch Text Int Action deriving(Show)
 
 data PushoverConf = PushoverConf Text (Map Text Text) deriving(Show)
 
@@ -33,6 +37,10 @@ parseBabyconf = do
   pc <- parsePushoverConf <* space
   srcs <- some parseSource <* eof
   pure $ Babyconf pc srcs
+
+-- Eat whitspace around a parser.
+spacey :: Parser a -> Parser a
+spacey f = space *> f <* space
 
 parseSource :: Parser Source
 parseSource = do
@@ -48,11 +56,11 @@ parseSource = do
       pure (u, lwtt, lwtm)
 
     watch = do
-      t <- "watch" *> space *> qstr <* space
+      t <- "watch" *> spacey qstr
       tm <- time <* space <* "->" <* space
-      u <- "alert" *> ((space *> word) `sepBy` ",")
+      act <- pact
 
-      pure $ Watch (pack t) tm u
+      pure $ Watch (pack t) tm act
 
     qstr = between "\"" "\"" (some $ noneOf ['"'])
 
@@ -65,7 +73,22 @@ parseSource = do
     plwt = do
       topic <- space *> qstr
       msg <- space *> qstr
-      pure (Just (pack topic), Just (BC.pack msg))
+      pure (Just (pack topic), Just (BU.fromString msg))
+
+    pact :: Parser Action
+    pact = try actAlert <|> actSet
+      where
+        actAlert = do
+          dests <- "alert" *> ((space *> word) `sepBy` ",")
+          pure $ ActAlert dests
+        actSet = do
+          t <- "set" *> spacey qstr
+          m <- spacey qstr
+          r <- pbool
+          pure $ ActSet (pack t) (BU.fromString m) r
+
+        pbool :: Parser Bool
+        pbool = True <$ "True" <|> False <$ "False"
 
     millis = (* 1000)
     seconds = millis . (* 1000)

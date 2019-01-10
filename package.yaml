@@ -30,6 +30,7 @@ dependencies:
 - async
 - bytestring
 - network-uri
+- utf8-string
 
 library:
   source-dirs: src
