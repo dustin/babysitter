@@ -3,8 +3,10 @@
 
 module Main where
 
+import           Control.Concurrent         (threadDelay)
 import           Control.Concurrent.Async   (mapConcurrently_)
-import           Control.Monad              (void)
+import           Control.Exception          (IOException, catch)
+import           Control.Monad              (forever, void)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Map.Strict            as Map
@@ -18,7 +20,7 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              helper, info, long, maybeReader,
                                              option, progDesc, showDefault,
                                              strOption, value, (<**>))
-import           System.Log.Logger          (Priority (INFO), infoM,
+import           System.Log.Logger          (Priority (INFO), errorM, infoM,
                                              rootLoggerName, setLevel,
                                              updateGlobalLogger)
 
@@ -49,6 +51,8 @@ options = Options
     mb = maybeReader $ pure.pure . BC.pack
 
 timedout :: PushoverConf -> Action -> MQTTClient -> Event -> Text -> IO ()
+
+-- Setting values.
 timedout _ (ActSet t m r) mc ev topic = do
   infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> set " <> unpack t
   to ev
@@ -56,6 +60,7 @@ timedout _ (ActSet t m r) mc ev topic = do
       to TimedOut = publishq mc t m r QoS2
       to _        = pure ()
 
+-- Alerting via pushover.
 timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
   infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> " <> show users
   to ev
@@ -102,16 +107,25 @@ connectMQTT uri lwtTopic lwtMsg f = do
     up x = let (u,r) = break (== ':') (init x) in
              (Just (unEscapeString u), if r == "" then Nothing else Just (unEscapeString $ tail r))
 
+withMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> IO ()) -> (MQTTClient -> IO ()) -> IO ()
+withMQTT u mlwtt mlwtm cb f = do
+  mc <- connectMQTT u mlwtt mlwtm cb
+  f mc
+  r <- waitForClient mc
+  infoM rootLoggerName $ mconcat ["Disconnected from ", show u, " ", show r]
+
 runWatcher :: PushoverConf -> Source -> IO ()
 runWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
   let things = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
   wd <- mkWatchDogs (topicMatch (minutes 60, undefined) things)
-  mc <- connectMQTT u mlwtt mlwtm (\c t _ -> feed wd t c)
-  feedStartup wd mc watches
-  infoM rootLoggerName $ "Subscribing at " <> show u <> " - " <> show [(t,QoS2) | (t,_) <- things]
-  subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
-  infoM rootLoggerName $ "Responded: " <> show subrv
-  print =<< waitForClient mc
+  feedStartup wd undefined watches
+
+  forever $ do
+    catch (withMQTT u mlwtt mlwtm (\c t _ -> feed wd t c) (subAndWait things)) (
+      \e -> errorM rootLoggerName $ mconcat ["connection to  ", show u, ": ",
+                                             show (e :: IOException)])
+
+    threadDelay (seconds 5)
 
     where
       -- Feed all the non-wildcarded watches to the watch dog so
@@ -120,6 +134,11 @@ runWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
       feedStartup wd mc (Watch t _ _:xs)
         | "#" `isSuffixOf` t = feedStartup wd mc xs
         | otherwise          = feed wd t mc >> feedStartup wd mc xs
+
+      subAndWait things mc = do
+        infoM rootLoggerName $ mconcat ["Subscribing at ", show u, " - ", show [(t,QoS2) | (t,_) <- things]]
+        subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
+        infoM rootLoggerName $ mconcat ["Sub response from ", show u, ": ", show subrv]
 
 run :: Options -> IO ()
 run Options{..} = do
