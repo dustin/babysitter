@@ -10,7 +10,7 @@ import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
 import           Data.Semigroup             ((<>))
-import           Data.Text                  (Text, pack, unpack)
+import           Data.Text                  (Text, isSuffixOf, pack, unpack)
 import           Network.API.Pushover
 import           Network.MQTT.Client
 import           Network.URI
@@ -107,10 +107,19 @@ runWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
   let things = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
   wd <- mkWatchDogs (topicMatch (minutes 60, undefined) things)
   mc <- connectMQTT u mlwtt mlwtm (\c t _ -> feed wd t c)
+  feedStartup wd mc watches
   infoM rootLoggerName $ "Subscribing at " <> show u <> " - " <> show [(t,QoS2) | (t,_) <- things]
   subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
   infoM rootLoggerName $ "Responded: " <> show subrv
   print =<< waitForClient mc
+
+    where
+      -- Feed all the non-wildcarded watches to the watch dog so
+      -- timeouts are meaningful from zero state.
+      feedStartup _ _ [] = pure ()
+      feedStartup wd mc (Watch t _ _:xs)
+        | "#" `isSuffixOf` t = feedStartup wd mc xs
+        | otherwise          = feed wd t mc >> feedStartup wd mc xs
 
 run :: Options -> IO ()
 run Options{..} = do
