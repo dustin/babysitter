@@ -45,7 +45,7 @@ testHeelin = do
   wd <- mkWatchDogs (const (millis 5, tod x))
   foldM_ (\_ k -> feed wd k ()) undefined keys
   heel wd
-  threadDelay (millis 50) -- enough time for something to surey have fired
+  threadDelay (millis 100) -- enough time for something to surey have fired
   r <- readTVarIO x
   assertEqual "" 0 r
 
