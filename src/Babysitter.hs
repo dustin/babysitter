@@ -26,7 +26,7 @@ type Watchers a b = Map a (Async (), TChan (), AlertFun a b)
 
 type State a b = TVar (Watchers a b)
 
-data (Ord a, Eq a) => WatchDogs a b = WatchDogs {
+data WatchDogs a b = WatchDogs {
   _cfgFor :: a -> (Int, AlertFun a b)
   , _st   :: State a b
   , _seen :: TVar (Set a)
