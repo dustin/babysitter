@@ -80,10 +80,12 @@ tests :: [TestTree]
 tests = [
   testGroup "topic matching" testTopicMatching,
 
-  testCase "watchdog firing" testWatchDoggin,
-  testCase "watchdog heeling" testHeelin,
-  testCase "return of the watchdog" testReturn
+  tmout $ testCase "watchdog firing" testWatchDoggin,
+  tmout $ testCase "watchdog heeling" testHeelin,
+  tmout $ testCase "return of the watchdog" testReturn
   ]
+
+  where tmout = localOption (Timeout 5000000 "5s")
 
 main :: IO ()
 main = defaultMain $ testGroup "All Tests" tests
