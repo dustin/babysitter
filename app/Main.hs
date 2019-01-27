@@ -79,33 +79,16 @@ timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
       users' = map (umap Map.!) users
 
 connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> IO ()) -> IO MQTTClient
-connectMQTT uri lwtTopic lwtMsg f = do
-  let cf = case uriScheme uri of
-             "mqtt:"  -> runClient
-             "mqtts:" -> runClientTLS
-             us       -> fail $ "invalid URI scheme: " <> us
-
-      (Just a) = uriAuthority uri
-      (u,p) = up (uriUserInfo a)
-
-  cf mqttConfig{_hostname=uriRegName a, _port=port (uriPort a) (uriScheme uri), _connID=cid (uriFragment uri),
-                _cleanSession=True,
-                _username=u, _password=p,
-                _lwt=mkLWT <$> lwtTopic <*> lwtMsg <*> Just False,
-                _msgCB=Just $ f}
+connectMQTT uri lwtTopic lwtMsg f = connectURI mqttConfig{_connID=cid (uriFragment uri),
+                                                          _cleanSession=True,
+                                                          _lwt=mkLWT <$> lwtTopic <*> lwtMsg <*> Just False,
+                                                          _msgCB=Just $ f}
+                                    uri
 
   where
-    port "" "mqtt:"  = 1883
-    port "" "mqtts:" = 8883
-    port x _         = read x
-
     cid ('#':[]) = "babysitter"
     cid ('#':xs) = xs
     cid _        = "babysitter"
-
-    up "" = (Nothing, Nothing)
-    up x = let (u,r) = break (== ':') (init x) in
-             (Just (unEscapeString u), if r == "" then Nothing else Just (unEscapeString $ tail r))
 
 withMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> IO ()) -> (MQTTClient -> IO ()) -> IO ()
 withMQTT u mlwtt mlwtm cb f = do
