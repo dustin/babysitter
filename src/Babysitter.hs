@@ -5,7 +5,7 @@ module Babysitter (
   AlertFun, WatchDogs, mkWatchDogs, feed, heel,
   Event(..),
   -- * Convenience functions
-  millis, seconds, minutes, topicMatch
+  millis, seconds, minutes,
   ) where
 
 import           Control.Concurrent.Async (Async, async, cancel)
@@ -17,7 +17,6 @@ import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as Map
 import           Data.Set                 (Set)
 import qualified Data.Set                 as Set
-import           Data.Text                (Text, dropEnd, dropWhileEnd)
 import           System.Timeout           (timeout)
 
 type AlertFun a b = b -> Event -> a -> IO ()
@@ -86,20 +85,3 @@ seconds = millis . (* 1000)
 
 minutes :: Int -> Int
 minutes = seconds . (* 60)
-
--- | Topic match matches MQTT topics since that's convenient for me.
-topicMatch :: a -> [(Text,a)] -> Text -> a
-topicMatch def = lu . Map.fromList
-
-  where
-    lu m p = case Map.lookup p m of
-               Just x  -> x
-               Nothing -> shrink (chop p)
-      where
-        chop = dropEnd 1 . dropWhileEnd (/= '/')
-
-        shrink "" = def
-        shrink t = case Map.lookup (t <> "/#") m of
-                     Just x  -> x
-                     Nothing -> shrink (chop t)
-

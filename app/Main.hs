@@ -12,9 +12,11 @@ import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
 import           Data.Semigroup             ((<>))
-import           Data.Text                  (Text, isSuffixOf, pack, unpack)
+import           Data.Text                  (Text, isInfixOf, isSuffixOf, pack,
+                                             unpack)
 import           Network.API.Pushover
 import           Network.MQTT.Client
+import           Network.MQTT.Topic         (match)
 import           Network.URI
 import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              helper, info, long, maybeReader,
@@ -100,7 +102,7 @@ withMQTT u mlwtt mlwtm cb f = do
 runWatcher :: PushoverConf -> Source -> IO ()
 runWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
   let things = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
-  wd <- mkWatchDogs (topicMatch (minutes 60, undefined) things)
+  wd <- mkWatchDogs (bestMatch things)
   feedStartup wd undefined watches
 
   forever $ do
@@ -111,11 +113,17 @@ runWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
     threadDelay (seconds 5)
 
     where
+      bestMatch [] t = error $ "no good match for " <> unpack t
+      bestMatch ((x,r):xs) t
+        | x `match` t = r
+        | otherwise = bestMatch xs t
       -- Feed all the non-wildcarded watches to the watch dog so
       -- timeouts are meaningful from zero state.
       feedStartup _ _ [] = pure ()
       feedStartup wd mc (Watch t _ _:xs)
         | "#" `isSuffixOf` t = feedStartup wd mc xs
+        | "+/" `isInfixOf` t = feedStartup wd mc xs
+        | "/+" `isInfixOf` t = feedStartup wd mc xs
         | otherwise          = feed wd t mc >> feedStartup wd mc xs
 
       subAndWait things mc = do

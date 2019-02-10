@@ -15,12 +15,6 @@ import           Test.Tasty.QuickCheck  as QC
 
 import           Babysitter
 
-testTopicMatching :: [TestTree]
-testTopicMatching =
-  let cfgs = [("a/#", 1), ("a/b", 2), ("a/b/c", 3), ("r/#", 9)] in
-    map (\(p,want) -> testCase (show p) $ assertEqual "" want (topicMatch 3600 cfgs p)) [
-    ("a/c", 1), ("a/b", 2), ("a/d", 1), ("a/b/c", 3), ("r/o/f/l", 9), ("d", 3600)]
-
 testWatchDoggin :: Assertion
 testWatchDoggin = do
   x <- newTVarIO []
@@ -78,8 +72,6 @@ testReturn = do
 
 tests :: [TestTree]
 tests = [
-  testGroup "topic matching" testTopicMatching,
-
   tmout $ testCase "watchdog firing" testWatchDoggin,
   tmout $ testCase "watchdog heeling" testHeelin,
   tmout $ testCase "return of the watchdog" testReturn
