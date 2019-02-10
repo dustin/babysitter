@@ -63,6 +63,7 @@ parseSource = do
       pure $ Watch (pack t) tm act
 
     qstr = between "\"" "\"" (some $ noneOf ['"'])
+           <|> between "'" "'" (some $ noneOf ['\''])
 
     time = do
       b <- L.decimal
