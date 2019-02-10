@@ -47,7 +47,7 @@ data Options = Options {
 
 options :: Parser Options
 options = Options
-  <$> option (maybeReader $ parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://test.mosquitto.org/#babysitter") <> help "mqtt broker URI")
+  <$> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://test.mosquitto.org/#babysitter") <> help "mqtt broker URI")
   <*> option mt (long "mqtt-lwt-topic" <> showDefault <> value Nothing <> help "mqtt last will topic")
   <*> option mb (long "mqtt-lwt-msg" <> showDefault <> value Nothing <> help "mqtt last will message")
   <*> strOption (long "pushover-token" <> showDefault <> value "" <> help "pushover token")
@@ -74,11 +74,11 @@ timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
   to ev
 
     where
-      to TimedOut = do
+      to TimedOut =
         mapM_ (\usr -> let m = (message tok usr (topic <> " timed out"))
                                {_title="Babysitter:  Timed Out"} in
                          void $ sendMessage m) users'
-      to Returned = do
+      to Returned =
         mapM_ (\usr -> let m = (message tok usr (topic <> " came back"))
                                {_title="Babysitter:  Came Back"} in
                          void $ sendMessage m) users'
@@ -90,11 +90,11 @@ connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -
 connectMQTT uri lwtTopic lwtMsg f = connectURI mqttConfig{_connID=cid (uriFragment uri),
                                                           _cleanSession=True,
                                                           _lwt=mkLWT <$> lwtTopic <*> lwtMsg <*> Just False,
-                                                          _msgCB=Just $ f}
+                                                          _msgCB=Just f}
                                     uri
 
   where
-    cid ('#':[]) = "babysitter"
+    cid ['#']    = "babysitter"
     cid ('#':xs) = xs
     cid _        = "babysitter"
 
@@ -150,7 +150,7 @@ runInfluxWatcher pc (Source (u,_,_) watches) = do
   let (Just uauth) = uriAuthority u
       h = uriRegName uauth
       dbname = drop 1 $ uriPath u
-      qp = queryParams (fromString dbname) & server.host .~ (fromString h)
+      qp = queryParams (fromString dbname) & server.host .~ fromString h
 
   periodically mempty (watchAll qp watches)
 
@@ -165,12 +165,12 @@ runInfluxWatcher pc (Source (u,_,_) watches) = do
       where
         watchOne :: Watch -> IO (Text,Status)
         watchOne (Watch t i act) = do
-          let q = (fromString . unpack $ t)
+          let q = fromString . unpack $ t
           r <- IDB.query qp q :: IO (V.Vector TSOnly)
           now <- getCurrentTime
           let (TSOnly x) = V.head r
               age = truncate $ diffUTCTime now x
-              firing = (seconds age) > i
+              firing = seconds age > i
               newst = if firing then Alerting else Clear
               shouldAlert = firing == (Map.findWithDefault Clear t m == Clear)
               ev = if newst == Alerting then TimedOut else Returned

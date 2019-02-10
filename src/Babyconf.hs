@@ -22,7 +22,7 @@ type Parser = Parsec Void Text
 
 data Babyconf = Babyconf PushoverConf [Source] deriving(Show)
 
-data Source = Source (URI, (Maybe Text), (Maybe BL.ByteString)) [Watch] deriving(Show)
+data Source = Source (URI, Maybe Text, Maybe BL.ByteString) [Watch] deriving(Show)
 
 data Action = ActAlert [Text]
             | ActSet Text BL.ByteString Bool
@@ -104,7 +104,7 @@ parsePushoverConf = do
   where
     pushover :: Parser Text
     pushover = do
-      t <- "dest pushover " *> (some $ noneOf ['\n'])
+      t <- "dest pushover " *> some (noneOf ['\n'])
       pure (pack t)
 
     user :: Parser (Text,Text)
@@ -116,7 +116,7 @@ word = pack <$> some alphaNumChar
 lineComment :: Parser ()
 lineComment = L.skipLineComment "#"
 
-itemList :: (Parser a) -> (Parser b) ->  Parser (a, [b])
+itemList :: Parser a -> Parser b ->  Parser (a, [b])
 itemList pa pb = L.nonIndented scn (L.indentBlock scn p)
   where
     scn = L.space space1 lineComment empty
