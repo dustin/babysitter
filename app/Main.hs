@@ -6,14 +6,20 @@ module Main where
 import           Control.Concurrent         (threadDelay)
 import           Control.Concurrent.Async   (mapConcurrently_)
 import           Control.Exception          (IOException, catch)
-import           Control.Monad              (forever, void)
+import           Control.Lens
+import           Control.Monad              (forever, mapM, void, when)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
+import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
 import           Data.Semigroup             ((<>))
+import           Data.String                (fromString)
 import           Data.Text                  (Text, isInfixOf, isSuffixOf, pack,
                                              unpack)
+import           Data.Time
+import qualified Data.Vector                as V
+import           Database.InfluxDB          as IDB
 import           Network.API.Pushover
 import           Network.MQTT.Client
 import           Network.MQTT.Topic         (match)
@@ -99,8 +105,8 @@ withMQTT u mlwtt mlwtm cb f = do
   r <- waitForClient mc
   infoM rootLoggerName $ mconcat ["Disconnected from ", show u, " ", show r]
 
-runWatcher :: PushoverConf -> Source -> IO ()
-runWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
+runMQTTWatcher :: PushoverConf -> Source -> IO ()
+runMQTTWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
   let things = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
   wd <- mkWatchDogs (bestMatch things)
   feedStartup wd undefined watches
@@ -131,6 +137,55 @@ runWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
         subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
         infoM rootLoggerName $ mconcat ["Sub response from ", show u, ": ", show subrv]
 
+newtype TSOnly = TSOnly UTCTime
+
+instance QueryResults TSOnly where
+  parseResults prec = parseResultsWithDecoder strictDecoder $ \_ _ columns fields ->
+    TSOnly <$> (getField "time" columns fields >>= parseUTCTime prec)
+
+data Status = Clear | Alerting deriving(Eq, Show)
+
+runInfluxWatcher :: PushoverConf -> Source -> IO ()
+runInfluxWatcher pc (Source (u,_,_) watches) = do
+  let (Just uauth) = uriAuthority u
+      h = uriRegName uauth
+      dbname = drop 1 $ uriPath u
+      qp = queryParams (fromString dbname) & server.host .~ (fromString h)
+
+  periodically mempty (watchAll qp watches)
+
+  where
+    periodically st f = do
+      st' <- f st
+      threadDelay (seconds 60)
+      periodically st' f
+
+    watchAll :: QueryParams -> [Watch] -> Map Text Status -> IO (Map Text Status)
+    watchAll qp ws m = Map.fromList <$> mapM watchOne ws
+      where
+        watchOne :: Watch -> IO (Text,Status)
+        watchOne (Watch t i act) = do
+          let q = (fromString . unpack $ t)
+          r <- IDB.query qp q :: IO (V.Vector TSOnly)
+          now <- getCurrentTime
+          let (TSOnly x) = V.head r
+              age = truncate $ diffUTCTime now x
+              firing = (seconds age) > i
+              newst = if firing then Alerting else Clear
+              shouldAlert = firing == (Map.findWithDefault Clear t m == Clear)
+              ev = if newst == Alerting then TimedOut else Returned
+          when shouldAlert $ timedout pc act undefined ev t
+          pure (t, newst)
+
+runWatcher :: PushoverConf -> Source -> IO ()
+runWatcher pc src@(Source (u,_,_) _)
+  | isMQTT = runMQTTWatcher pc src
+  | isInflux = runInfluxWatcher pc src
+  | otherwise = fail ("Don't know how to watch: " <> show u)
+
+  where isMQTT = uriScheme u `elem` ["mqtt:", "mqtts:"]
+        isInflux = uriScheme u == "influx:"
+
 run :: Options -> IO ()
 run Options{..} = do
   (Babyconf dests srcs) <- parseConfFile optConfFile
@@ -139,7 +194,7 @@ run Options{..} = do
 main :: IO ()
 main = do
   updateGlobalLogger rootLoggerName (setLevel INFO)
-  (run =<< execParser opts)
+  run =<< execParser opts
 
   where opts = info (options <**> helper)
           ( fullDesc <> progDesc "Watch the things.")

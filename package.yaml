@@ -31,6 +31,10 @@ dependencies:
 - bytestring
 - network-uri
 - utf8-string
+- lens
+- influxdb
+- vector
+- time
 
 library:
   source-dirs: src
