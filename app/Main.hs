@@ -12,7 +12,7 @@ import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust)
+import           Data.Maybe                 (catMaybes, fromJust)
 import           Data.Semigroup             ((<>))
 import           Data.String                (fromString)
 import           Data.Text                  (Text, isInfixOf, isSuffixOf, pack,
@@ -137,7 +137,7 @@ runMQTTWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
         subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
         infoM rootLoggerName $ mconcat ["Sub response from ", show u, ": ", show subrv]
 
-newtype TSOnly = TSOnly UTCTime
+newtype TSOnly = TSOnly UTCTime deriving(Show)
 
 instance QueryResults TSOnly where
   parseResults prec = parseResultsWithDecoder strictDecoder $ \_ _ columns fields ->
@@ -161,21 +161,25 @@ runInfluxWatcher pc (Source (u,_,_) watches) = do
       periodically st' f
 
     watchAll :: QueryParams -> [Watch] -> Map Text Status -> IO (Map Text Status)
-    watchAll qp ws m = Map.fromList <$> mapM watchOne ws
+    watchAll qp ws m = Map.fromList . catMaybes <$> mapM watchOne ws
       where
-        watchOne :: Watch -> IO (Text,Status)
+        watchOne :: Watch -> IO (Maybe (Text,Status))
         watchOne (Watch t i act) = do
           let q = fromString . unpack $ t
           r <- IDB.query qp q :: IO (V.Vector TSOnly)
           now <- getCurrentTime
-          let (TSOnly x) = V.head r
-              age = truncate $ diffUTCTime now x
-              firing = seconds age > i
-              newst = if firing then Alerting else Clear
-              shouldAlert = firing == (Map.findWithDefault Clear t m == Clear)
-              ev = if newst == Alerting then TimedOut else Returned
-          when shouldAlert $ timedout pc act undefined ev t
-          pure (t, newst)
+          case r V.!? 0 of
+            Just (TSOnly x) -> do
+              let age = truncate $ diffUTCTime now x
+                  firing = seconds age > i
+                  newst = if firing then Alerting else Clear
+                  shouldAlert = firing == (Map.findWithDefault Clear t m == Clear)
+                  ev = if newst == Alerting then TimedOut else Returned
+              when shouldAlert $ timedout pc act undefined ev t
+              pure $ Just (t, newst)
+            x -> (errorM rootLoggerName $ mconcat ["Failed to load data for ",
+                                                   unpack t, ": ", show x])
+                 >> pure Nothing
 
 runWatcher :: PushoverConf -> Source -> IO ()
 runWatcher pc src@(Source (u,_,_) _)
