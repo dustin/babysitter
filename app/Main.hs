@@ -10,12 +10,15 @@ import           Control.Lens
 import           Control.Monad              (forever, mapM, void, when)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
+import           Data.HashMap.Strict        (HashMap)
+import qualified Data.HashMap.Strict        as HM
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (catMaybes, fromJust)
+import           Data.Maybe                 (fromJust)
 import           Data.Semigroup             ((<>))
 import           Data.String                (fromString)
-import           Data.Text                  (Text, isInfixOf, isSuffixOf, pack,
+import           Data.Text                  (Text, concat, intercalate,
+                                             isInfixOf, isSuffixOf, pack,
                                              unpack)
 import           Data.Time
 import qualified Data.Vector                as V
@@ -137,11 +140,11 @@ runMQTTWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
         subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
         infoM rootLoggerName $ mconcat ["Sub response from ", show u, ": ", show subrv]
 
-newtype TSOnly = TSOnly UTCTime deriving(Show)
+data TSOnly = TSOnly UTCTime (HashMap Text Text) deriving(Show)
 
 instance QueryResults TSOnly where
-  parseResults prec = parseResultsWithDecoder strictDecoder $ \_ _ columns fields ->
-    TSOnly <$> (getField "time" columns fields >>= parseUTCTime prec)
+  parseResults prec = parseResultsWithDecoder strictDecoder $ \_ m columns fields ->
+    TSOnly <$> (getField "time" columns fields >>= parseUTCTime prec) <*> pure m
 
 data Status = Clear | Alerting deriving(Eq, Show)
 
@@ -161,25 +164,32 @@ runInfluxWatcher pc (Source (u,_,_) watches) = do
       periodically st' f
 
     watchAll :: QueryParams -> [Watch] -> Map Text Status -> IO (Map Text Status)
-    watchAll qp ws m = Map.fromList . catMaybes <$> mapM watchOne ws
+    watchAll qp ws m = Map.fromList . Prelude.concat <$> mapM watchOne ws
       where
-        watchOne :: Watch -> IO (Maybe (Text,Status))
-        watchOne (Watch t i act) = do
+        watchOne :: Watch -> IO [(Text,Status)]
+        watchOne w@(Watch t _ _) = do
           let q = fromString . unpack $ t
           r <- IDB.query qp q :: IO (V.Vector TSOnly)
           now <- getCurrentTime
-          case r V.!? 0 of
-            Just (TSOnly x) -> do
-              let age = truncate $ diffUTCTime now x
-                  firing = seconds age > i
-                  newst = if firing then Alerting else Clear
-                  shouldAlert = firing == (Map.findWithDefault Clear t m == Clear)
-                  ev = if newst == Alerting then TimedOut else Returned
-              when shouldAlert $ timedout pc act undefined ev t
-              pure $ Just (t, newst)
-            x -> (errorM rootLoggerName $ mconcat ["Failed to load data for ",
-                                                   unpack t, ": ", show x])
-                 >> pure Nothing
+          mapM (maybeAlert w now) (V.toList r)
+
+        maybeAlert :: Watch -> UTCTime -> TSOnly -> IO (Text, Status)
+        maybeAlert (Watch t i act) now (TSOnly x tags) = do
+          let age = truncate $ diffUTCTime now x
+              firing = seconds age > i
+              newst = if firing then Alerting else Clear
+              shouldAlert = firing == (Map.findWithDefault Clear t m == Clear)
+              ev = if newst == Alerting then TimedOut else Returned
+              msg = if null tags then t else (t <> tagstr tags)
+          when shouldAlert $ timedout pc act undefined ev msg
+          pure $ (msg, newst)
+
+        tagstr :: HashMap Text Text -> Text
+        tagstr t
+          | null t = ""
+          | otherwise = Data.Text.concat [" [",
+                                          (intercalate ", " . map (\(k,v) -> k <> "=" <> v) . HM.toList) t,
+                                          "]"]
 
 runWatcher :: PushoverConf -> Source -> IO ()
 runWatcher pc src@(Source (u,_,_) _)

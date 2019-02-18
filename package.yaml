@@ -27,6 +27,7 @@ dependencies:
 - pushover-hs
 - net-mqtt
 - containers
+- unordered-containers
 - async
 - bytestring
 - network-uri
