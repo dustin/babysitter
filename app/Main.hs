@@ -178,9 +178,9 @@ runInfluxWatcher pc (Source (u,_,_) watches) = do
           let age = truncate $ diffUTCTime now x
               firing = seconds age > i
               newst = if firing then Alerting else Clear
-              shouldAlert = firing == (Map.findWithDefault Clear t m == Clear)
               ev = if newst == Alerting then TimedOut else Returned
               msg = if null tags then t else (t <> tagstr tags)
+              shouldAlert = firing == (Map.findWithDefault Clear msg m == Clear)
           when shouldAlert $ timedout pc act undefined ev msg
           pure $ (msg, newst)
 
