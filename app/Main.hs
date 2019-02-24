@@ -23,7 +23,7 @@ import           Data.Text                  (Text, concat, intercalate,
 import           Data.Time
 import qualified Data.Vector                as V
 import           Database.InfluxDB          as IDB
-import           Network.API.Pushover
+import           Network.API.Pushover       (message, sendMessage, _title)
 import           Network.MQTT.Client
 import           Network.MQTT.Topic         (match)
 import           Network.URI
