@@ -17,7 +17,7 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: lts-13.6
+resolver: lts-13.10
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -42,9 +42,7 @@ extra-deps:
 # - git: https://github.com/dustin/mqtt-hs.git
 #   commit: 4a4f6cfaa9ad6217410df63646303f68ad86db54
 # - /Users/dsal/prog/mqtt
-# - net-mqtt-0.2.4.0
-- github: dustin/mqtt-hs
-  commit: master
+- net-mqtt-0.2.4.1
 - git: https://github.com/dustin/pushover-hs.git
   commit: 1fc03e4459e55afb7a064f95484dae024953faee
 
