@@ -7,6 +7,7 @@ module Babysitter (
   millis, seconds, minutes,
   ) where
 
+import Control.Monad (unless)
 import           Control.Concurrent.Async (Async, async, cancel)
 import           Control.Concurrent.STM   (TChan, TVar, atomically, modifyTVar',
                                            newTChanIO, newTVarIO, readTChan,
@@ -61,9 +62,18 @@ feed WatchDogs{..} t a = do
       nevent >>= \ev -> f a ev t
       ch <- newTChanIO
       ws <- async $ watch ch i f
-      atomically $ do
-        modifyTVar' _st (Map.insert t (ws,ch,f))
-        modifyTVar' _seen (Set.insert t)
+      added <- atomically $ do
+        m <- readTVar _st
+        mightStart (ws,ch,f) $ Map.lookup t m
+
+      unless added $ cancel ws
+
+          where
+            mightStart _ (Just _) = pure False
+            mightStart x Nothing = do
+              modifyTVar' _st (Map.insert t x)
+              modifyTVar' _seen (Set.insert t)
+              pure True
 
     nevent = readTVarIO _seen >>= \s -> if Set.member t s then pure Returned else pure Created
 
