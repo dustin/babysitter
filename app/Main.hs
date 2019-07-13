@@ -125,13 +125,16 @@ runMQTTWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
   feedStartup wd undefined watches
 
   forever $ do
-    catch (withMQTT u mlwtt mlwtm (\c t _ -> feed wd t c) (subAndWait things)) (
+    catch (withMQTT u mlwtt mlwtm (gotMsg wd) (subAndWait things)) (
       \e -> errorM rootLoggerName $ mconcat ["connection to  ", show u, ": ",
                                              show (e :: IOException)])
 
     threadDelay (seconds 5)
 
     where
+      gotMsg _ _ _ "" = pure ()
+      gotMsg wd c t _ = feed wd t c
+
       bestMatch [] t = error $ "no good match for " <> unpack t
       bestMatch ((x,r):xs) t
         | x `match` t = r
