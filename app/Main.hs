@@ -71,6 +71,16 @@ timedout _ (ActSet t m r) mc ev topic = do
       to TimedOut = publishq mc t m r QoS2
       to _        = pure ()
 
+-- Clearing values.
+timedout _ ActDelete mc ev topic = do
+  infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> delete"
+  to ev
+    where
+      to TimedOut = do
+        infoM rootLoggerName $ "deleting " <> unpack topic <> " after timeout"
+        publishq mc topic "" True QoS2
+      to _        = pure ()
+
 -- Alerting via pushover.
 timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
   infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> " <> show users

@@ -26,6 +26,7 @@ data Source = Source (URI, Maybe Text, Maybe BL.ByteString) [Watch] deriving(Sho
 
 data Action = ActAlert [Text]
             | ActSet Text BL.ByteString Bool
+            | ActDelete
             deriving (Show)
 
 data Watch = Watch Text Int Action deriving(Show)
@@ -77,7 +78,7 @@ parseSource = do
       pure (Just (pack topic), Just (BU.fromString msg))
 
     pact :: Parser Action
-    pact = try actAlert <|> actSet
+    pact = try actAlert <|> actSet <|> actDelete
       where
         actAlert = do
           dests <- "alert" *> ((space *> word) `sepBy` ",")
@@ -87,6 +88,7 @@ parseSource = do
           m <- spacey qstr
           r <- pbool
           pure $ ActSet (pack t) (BU.fromString m) r
+        actDelete = ActDelete <$ "delete"
 
         pbool :: Parser Bool
         pbool = True <$ "True" <|> False <$ "False"
