@@ -68,7 +68,7 @@ timedout _ (ActSet t m r) mc ev topic = do
   infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> set " <> unpack t
   to ev
     where
-      to TimedOut = publishq mc t m r QoS2
+      to TimedOut = publishq mc t m r QoS2 mempty
       to _        = pure ()
 
 -- Clearing values.
@@ -78,7 +78,7 @@ timedout _ ActDelete mc ev topic = do
     where
       to TimedOut = do
         infoM rootLoggerName $ "deleting " <> unpack topic <> " after timeout"
-        publishq mc topic "" True QoS2
+        publishq mc topic "" True QoS2 mempty
       to _        = pure ()
 
 -- Alerting via pushover.
@@ -99,7 +99,7 @@ timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
 
       users' = map (umap Map.!) users
 
-connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> IO ()) -> IO MQTTClient
+connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> IO MQTTClient
 connectMQTT uri lwtTopic lwtMsg f = connectURI mqttConfig{_connID=cid (uriFragment uri),
                                                           _cleanSession=True,
                                                           _lwt=mkLWT <$> lwtTopic <*> lwtMsg <*> Just False,
@@ -111,7 +111,7 @@ connectMQTT uri lwtTopic lwtMsg f = connectURI mqttConfig{_connID=cid (uriFragme
     cid ('#':xs) = xs
     cid _        = "babysitter"
 
-withMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> IO ()) -> (MQTTClient -> IO ()) -> IO ()
+withMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> IO ()
 withMQTT u mlwtt mlwtm cb f = do
   mc <- connectMQTT u mlwtt mlwtm cb
   f mc
@@ -132,8 +132,8 @@ runMQTTWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
     threadDelay (seconds 5)
 
     where
-      gotMsg _ _ _ "" = pure ()
-      gotMsg wd c t _ = feed wd t c
+      gotMsg _ _ _ "" _ = pure ()
+      gotMsg wd c t _ _ = feed wd t c
 
       bestMatch [] t = error $ "no good match for " <> unpack t
       bestMatch ((x,r):xs) t
@@ -149,8 +149,8 @@ runMQTTWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
         | otherwise          = feed wd t mc >> feedStartup wd mc xs
 
       subAndWait things mc = do
-        infoM rootLoggerName $ mconcat ["Subscribing at ", show u, " - ", show [(t,QoS2) | (t,_) <- things]]
-        subrv <- subscribe mc [(t,QoS2) | (t,_) <- things]
+        infoM rootLoggerName $ mconcat ["Subscribing at ", show u, " - ", show [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things]]
+        subrv <- subscribe mc [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things]
         infoM rootLoggerName $ mconcat ["Sub response from ", show u, ": ", show subrv]
 
 data TSOnly = TSOnly UTCTime (HashMap Text Text) deriving(Show)
