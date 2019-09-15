@@ -150,7 +150,7 @@ runMQTTWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
 
       subAndWait things mc = do
         infoM rootLoggerName $ mconcat ["Subscribing at ", show u, " - ", show [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things]]
-        subrv <- subscribe mc [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things]
+        subrv <- subscribe mc [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things] mempty
         infoM rootLoggerName $ mconcat ["Sub response from ", show u, ": ", show subrv]
 
 data TSOnly = TSOnly UTCTime (HashMap Text Text) deriving(Show)
