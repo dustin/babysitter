@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
 
-module Babyconf (parseConfFile, Babyconf(..), Source(..), Watch(..), Action(..), PushoverConf(..)) where
+module Babyconf (parseConfFile, Protocol(..), Babyconf(..), Source(..), Watch(..), Action(..), PushoverConf(..)) where
 
 import           Control.Applicative        (empty, (<|>))
 import qualified Data.ByteString.Lazy       as BL
@@ -22,7 +22,9 @@ type Parser = Parsec Void Text
 
 data Babyconf = Babyconf PushoverConf [Source] deriving(Show)
 
-data Source = Source (URI, Maybe Text, Maybe BL.ByteString) [Watch] deriving(Show)
+data Protocol = MQTT311 | MQTT5 deriving (Show, Eq)
+
+data Source = Source (URI, Protocol, Maybe Text, Maybe BL.ByteString) [Watch] deriving(Show)
 
 data Action = ActAlert [Text]
             | ActSet Text BL.ByteString Bool
@@ -52,9 +54,10 @@ parseSource = do
     src = do
       _ <- "src" *> space
       ustr <- some (noneOf ['\n', ' '])
+      pl <- option MQTT311 (try prot)
       let (Just u) = parseURI ustr
       (lwtt,lwtm) <- option (Nothing, Nothing) (try plwt)
-      pure (u, lwtt, lwtm)
+      pure (u, pl, lwtt, lwtm)
 
     watch = do
       t <- "watch" *> spacey qstr
@@ -62,6 +65,8 @@ parseSource = do
       act <- pact
 
       pure $ Watch (pack t) tm act
+
+    prot = spacey (MQTT5 <$ "mqtt5")
 
     qstr = between "\"" "\"" (some $ noneOf ['"'])
            <|> between "'" "'" (some $ noneOf ['\''])

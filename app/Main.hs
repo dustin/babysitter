@@ -99,33 +99,28 @@ timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
 
       users' = map (umap Map.!) users
 
-connectMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> IO MQTTClient
-connectMQTT uri lwtTopic lwtMsg f = connectURI mqttConfig{_connID=cid (uriFragment uri),
-                                                          _cleanSession=True,
-                                                          _lwt=mkLWT <$> lwtTopic <*> lwtMsg <*> Just False,
-                                                          _msgCB=Just f}
-                                    uri
-
-  where
-    cid ['#']    = "babysitter"
-    cid ('#':xs) = xs
-    cid _        = "babysitter"
-
-withMQTT :: URI -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> IO ()
-withMQTT u mlwtt mlwtm cb f = do
-  mc <- connectMQTT u mlwtt mlwtm cb
+withMQTT :: URI -> Protocol -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> IO ()
+withMQTT u pl mlwtt mlwtm cb f = do
+  mc <- connectURI mqttConfig{_cleanSession=True,
+                              _protocol=mpl pl,
+                              _lwt=mkLWT <$> mlwtt <*> mlwtm <*> Just False,
+                              _msgCB=Just cb} u
   f mc
   r <- waitForClient mc
   infoM rootLoggerName $ mconcat ["Disconnected from ", show u, " ", show r]
 
+  where
+    mpl MQTT311 = Protocol311
+    mpl MQTT5   = Protocol50
+
 runMQTTWatcher :: PushoverConf -> Source -> IO ()
-runMQTTWatcher pc (Source (u,mlwtt,mlwtm) watches) = do
+runMQTTWatcher pc (Source (u,pl,mlwtt,mlwtm) watches) = do
   let things = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
   wd <- mkWatchDogs (bestMatch things)
   feedStartup wd undefined watches
 
   forever $ do
-    catch (withMQTT u mlwtt mlwtm (gotMsg wd) (subAndWait things)) (
+    catch (withMQTT u pl mlwtt mlwtm (gotMsg wd) (subAndWait things)) (
       \e -> errorM rootLoggerName $ mconcat ["connection to  ", show u, ": ",
                                              show (e :: IOException)])
 
@@ -162,7 +157,7 @@ instance QueryResults TSOnly where
 data Status = Clear | Alerting deriving(Eq, Show)
 
 runInfluxWatcher :: PushoverConf -> Source -> IO ()
-runInfluxWatcher pc (Source (u,_,_) watches) = do
+runInfluxWatcher pc (Source (u,_,_,_) watches) = do
   let (Just uauth) = uriAuthority u
       h = uriRegName uauth
       dbname = drop 1 $ uriPath u
@@ -205,7 +200,7 @@ runInfluxWatcher pc (Source (u,_,_) watches) = do
                                           "]"]
 
 runWatcher :: PushoverConf -> Source -> IO ()
-runWatcher pc src@(Source (u,_,_) _)
+runWatcher pc src@(Source (u,_,_,_) _)
   | isMQTT = runMQTTWatcher pc src
   | isInflux = runInfluxWatcher pc src
   | otherwise = fail ("Don't know how to watch: " <> show u)
