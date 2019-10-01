@@ -104,7 +104,7 @@ withMQTT u pl mlwtt mlwtm cb f = do
   mc <- connectURI mqttConfig{_cleanSession=True,
                               _protocol=mpl pl,
                               _lwt=mkLWT <$> mlwtt <*> mlwtm <*> Just False,
-                              _msgCB=Just cb} u
+                              _msgCB=SimpleCallback cb} u
   f mc
   r <- waitForClient mc
   infoM rootLoggerName $ mconcat ["Disconnected from ", show u, " ", show r]
