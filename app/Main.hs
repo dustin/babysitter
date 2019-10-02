@@ -5,7 +5,7 @@ module Main where
 
 import           Control.Concurrent         (threadDelay)
 import           Control.Concurrent.Async   (mapConcurrently_)
-import           Control.Exception          (IOException, catch)
+import           Control.Exception          (SomeException, catch)
 import           Control.Lens
 import           Control.Monad              (forever, mapM, void, when)
 import qualified Data.ByteString.Lazy       as BL
@@ -122,7 +122,7 @@ runMQTTWatcher pc (Source (u,pl,mlwtt,mlwtm) watches) = do
   forever $ do
     catch (withMQTT u pl mlwtt mlwtm (gotMsg wd) (subAndWait things)) (
       \e -> errorM rootLoggerName $ mconcat ["connection to  ", show u, ": ",
-                                             show (e :: IOException)])
+                                             show (e :: SomeException)])
 
     threadDelay (seconds 5)
 
