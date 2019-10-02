@@ -27,10 +27,11 @@ import           Network.API.Pushover       (message, sendMessage, _title)
 import           Network.MQTT.Client
 import           Network.MQTT.Topic         (match)
 import           Network.URI
-import           Options.Applicative        (Parser, execParser, fullDesc, help,
-                                             helper, info, long, maybeReader,
-                                             option, progDesc, showDefault,
-                                             strOption, value, (<**>))
+import           Options.Applicative        (Parser, auto, execParser, fullDesc,
+                                             help, helper, info, long,
+                                             maybeReader, option, progDesc,
+                                             showDefault, strOption, value,
+                                             (<**>))
 import           System.Log.Logger          (Priority (INFO), errorM, infoM,
                                              rootLoggerName, setLevel,
                                              updateGlobalLogger)
@@ -46,6 +47,7 @@ data Options = Options {
   , optPushoverToken :: Text
   , optPushoverUser  :: Text
   , optConfFile      :: String
+  , optDelaySeconds  :: Int
   }
 
 options :: Parser Options
@@ -56,6 +58,7 @@ options = Options
   <*> strOption (long "pushover-token" <> showDefault <> value "" <> help "pushover token")
   <*> strOption (long "pushover-user" <> showDefault <> value "" <> help "pushover user")
   <*> strOption (long "conf" <> showDefault <> value "baby.conf" <> help "config file")
+  <*> option auto (long "delay" <> value 0 <> help "seconds to wait before starting influx watcher")
 
   where
     mt = maybeReader $ pure.pure.pack
@@ -199,19 +202,19 @@ runInfluxWatcher pc (Source (u,_,_,_) watches) = do
                                           (intercalate ", " . map (\(k,v) -> k <> "=" <> v) . HM.toList) t,
                                           "]"]
 
-runWatcher :: PushoverConf -> Source -> IO ()
-runWatcher pc src@(Source (u,_,_,_) _)
+runWatcher :: Options -> PushoverConf -> Source -> IO ()
+runWatcher Options{..} pc src@(Source (u,_,_,_) _)
   | isMQTT = runMQTTWatcher pc src
-  | isInflux = runInfluxWatcher pc src
+  | isInflux = threadDelay (seconds optDelaySeconds) >> runInfluxWatcher pc src
   | otherwise = fail ("Don't know how to watch: " <> show u)
 
   where isMQTT = uriScheme u `elem` ["mqtt:", "mqtts:"]
         isInflux = uriScheme u == "influx:"
 
 run :: Options -> IO ()
-run Options{..} = do
+run opts@Options{..} = do
   (Babyconf dests srcs) <- parseConfFile optConfFile
-  mapConcurrently_ (runWatcher dests) srcs
+  mapConcurrently_ (runWatcher opts dests) srcs
 
 main :: IO ()
 main = do
