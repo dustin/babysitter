@@ -14,7 +14,7 @@ import           Data.HashMap.Strict        (HashMap)
 import qualified Data.HashMap.Strict        as HM
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust)
+import           Data.Maybe                 (fromJust, isNothing)
 import           Data.Semigroup             ((<>))
 import           Data.String                (fromString)
 import           Data.Text                  (Text, concat, intercalate,
@@ -35,6 +35,7 @@ import           Options.Applicative        (Parser, auto, execParser, fullDesc,
 import           System.Log.Logger          (Priority (INFO), errorM, infoM,
                                              rootLoggerName, setLevel,
                                              updateGlobalLogger)
+import           System.Timeout             (timeout)
 
 
 import           Babyconf
@@ -104,10 +105,9 @@ timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
 
 withMQTT :: URI -> Protocol -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> IO ()
 withMQTT u pl mlwtt mlwtm cb f = do
-  mc <- connectURI mqttConfig{_cleanSession=True,
-                              _protocol=mpl pl,
-                              _lwt=mkLWT <$> mlwtt <*> mlwtm <*> Just False,
-                              _msgCB=SimpleCallback cb} u
+  mc' <- timeout 15000000 conn
+  when (isNothing mc') $ fail ("timed out connecting to " <> show u)
+  let mc = fromJust mc'
   f mc
   r <- waitForClient mc
   infoM rootLoggerName $ mconcat ["Disconnected from ", show u, " ", show r]
@@ -115,6 +115,12 @@ withMQTT u pl mlwtt mlwtm cb f = do
   where
     mpl MQTT311 = Protocol311
     mpl MQTT5   = Protocol50
+
+    conn = connectURI mqttConfig{_cleanSession=True,
+                                 _protocol=mpl pl,
+                                 _lwt=mkLWT <$> mlwtt <*> mlwtm <*> Just False,
+                                 _msgCB=SimpleCallback cb} u
+
 
 runMQTTWatcher :: PushoverConf -> Source -> IO ()
 runMQTTWatcher pc (Source (u,pl,mlwtt,mlwtm) watches) = do
@@ -124,7 +130,7 @@ runMQTTWatcher pc (Source (u,pl,mlwtt,mlwtm) watches) = do
 
   forever $ do
     catch (withMQTT u pl mlwtt mlwtm (gotMsg wd) (subAndWait things)) (
-      \e -> errorM rootLoggerName $ mconcat ["connection to  ", show u, ": ",
+      \e -> errorM rootLoggerName $ mconcat ["connection to ", show u, ": ",
                                              show (e :: SomeException)])
 
     threadDelay (seconds 5)
