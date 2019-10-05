@@ -5,7 +5,7 @@ module Main where
 
 import           Control.Concurrent         (threadDelay)
 import           Control.Concurrent.Async   (mapConcurrently_)
-import           Control.Exception          (SomeException, catch)
+import           Control.Exception          (SomeException, bracket, catch)
 import           Control.Lens
 import           Control.Monad              (forever, mapM, void, when)
 import qualified Data.ByteString.Lazy       as BL
@@ -14,7 +14,7 @@ import           Data.HashMap.Strict        (HashMap)
 import qualified Data.HashMap.Strict        as HM
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust, isNothing)
+import           Data.Maybe                 (fromJust)
 import           Data.Semigroup             ((<>))
 import           Data.String                (fromString)
 import           Data.Text                  (Text, concat, intercalate,
@@ -104,13 +104,7 @@ timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
       users' = map (umap Map.!) users
 
 withMQTT :: URI -> Protocol -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> IO ()
-withMQTT u pl mlwtt mlwtm cb f = do
-  mc' <- timeout 15000000 conn
-  when (isNothing mc') $ fail ("timed out connecting to " <> show u)
-  let mc = fromJust mc'
-  f mc
-  r <- waitForClient mc
-  infoM rootLoggerName $ mconcat ["Disconnected from ", show u, " ", show r]
+withMQTT u pl mlwtt mlwtm cb f = bracket connto normalDisconnect go
 
   where
     mpl MQTT311 = Protocol311
@@ -120,6 +114,13 @@ withMQTT u pl mlwtt mlwtm cb f = do
                                  _protocol=mpl pl,
                                  _lwt=mkLWT <$> mlwtt <*> mlwtm <*> Just False,
                                  _msgCB=SimpleCallback cb} u
+
+    connto = timeout 15000000 conn >>= maybe (fail ("timed out connecting to " <> show u)) pure
+
+    go mc = do
+      f mc
+      r <- waitForClient mc
+      infoM rootLoggerName $ mconcat ["Disconnected from ", show u, " ", show r]
 
 
 runMQTTWatcher :: PushoverConf -> Source -> IO ()
