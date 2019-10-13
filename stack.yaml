@@ -42,12 +42,10 @@ extra-deps:
 # - git: https://github.com/dustin/mqtt-hs.git
 #   commit: 4a4f6cfaa9ad6217410df63646303f68ad86db54
 # - /Users/dsal/prog/mqtt
-# - net-mqtt-0.6.0.0
+- net-mqtt-0.6.0.0
+
 - git: https://github.com/dustin/pushover-hs.git
   commit: 1fc03e4459e55afb7a064f95484dae024953faee
-
-- git: https://github.com/dustin/mqtt-hs.git
-  commit: c98888f939ae9201a9e2bac1290687778742cc1a
 
    # Override default flag values for local packages and extra-deps
 # flags: {}
