@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Babysitter (
   AlertFun, WatchDogs, mkWatchDogs, feed, heel,
@@ -7,12 +7,12 @@ module Babysitter (
   millis, seconds, minutes,
   ) where
 
-import Control.Monad (unless)
 import           Control.Concurrent.Async (Async, async, cancel)
 import           Control.Concurrent.STM   (TChan, TVar, atomically, modifyTVar',
                                            newTChanIO, newTVarIO, readTChan,
                                            readTVar, readTVarIO, writeTChan,
                                            writeTVar)
+import           Control.Monad            (unless)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as Map
 import           Data.Set                 (Set)

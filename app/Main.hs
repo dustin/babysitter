@@ -6,12 +6,13 @@ module Main where
 import           Control.Concurrent         (threadDelay)
 import           Control.Concurrent.Async   (mapConcurrently_)
 import           Control.Exception          (SomeException, bracket, catch)
-import           Control.Lens
+import           Control.Lens               ((&), (.~))
 import           Control.Monad              (forever, mapM, void, when)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.HashMap.Strict        (HashMap)
 import qualified Data.HashMap.Strict        as HM
+import           Data.List                  (partition)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
@@ -20,10 +21,12 @@ import           Data.String                (fromString)
 import           Data.Text                  (Text, concat, intercalate,
                                              isInfixOf, isSuffixOf, pack,
                                              unpack)
+import qualified Data.Text.Encoding         as TE
 import           Data.Time
 import qualified Data.Vector                as V
 import           Database.InfluxDB          as IDB
-import           Network.API.Pushover       (message, sendMessage, _title)
+import           Network.API.Pushover       (message, sendMessage, _body,
+                                             _title)
 import           Network.MQTT.Client
 import           Network.MQTT.Topic         (match)
 import           Network.URI
@@ -125,12 +128,14 @@ withMQTT u pl mlwtt mlwtm cb f = bracket connto normalDisconnect go
 
 runMQTTWatcher :: PushoverConf -> Source -> IO ()
 runMQTTWatcher pc (Source (u,pl,mlwtt,mlwtm) watches) = do
-  let things = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
-  wd <- mkWatchDogs (bestMatch things)
-  feedStartup wd undefined watches
+  let (instant, timeouts) = partition (\(Watch _ i _) -> i == 0) watches
+      toThings = map (\(Watch t i action) -> (t, (i, timedout pc action))) timeouts
+      allThings = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
+  wd <- mkWatchDogs (bestMatch toThings)
+  feedStartup wd undefined timeouts
 
   forever $ do
-    catch (withMQTT u pl mlwtt mlwtm (gotMsg wd) (subAndWait things)) (
+    catch (withMQTT u pl mlwtt mlwtm (gotMsg (wd, instant)) (subAndWait allThings)) (
       \e -> errorM rootLoggerName $ mconcat ["connection to ", show u, ": ",
                                              show (e :: SomeException)])
 
@@ -138,7 +143,22 @@ runMQTTWatcher pc (Source (u,pl,mlwtt,mlwtm) watches) = do
 
     where
       gotMsg _ _ _ "" _ = pure ()
-      gotMsg wd c t _ _ = feed wd t c
+      gotMsg (wd, instant) c t m _
+        | instMatch = alertMsg (TE.decodeUtf8 . BL.toStrict $ m)
+        | otherwise = feed wd t c
+        where
+          insts = filter (\(Watch x _ _) -> x `match` t) instant
+          instMatch = (not . null) insts
+          alertMsg :: Text -> IO ()
+          alertMsg b = do
+            infoM rootLoggerName $ mconcat ["Instant alert: ", show users, " ", show t, ", ", show m]
+            mapM_ (\usr -> let msg = (message tok usr t){_title="Babysitter Now: " <> t, _body=b} in
+                             void $ sendMessage msg) users'
+          users = concatMap ufunc insts
+          users' = map (umap Map.!) users
+          ufunc (Watch _ _ (ActAlert x)) = x
+          ufunc _                        = []
+          (tok, umap) = let PushoverConf t' m' = pc in (t', m')
 
       bestMatch [] t = error $ "no good match for " <> unpack t
       bestMatch ((x,r):xs) t
@@ -147,7 +167,8 @@ runMQTTWatcher pc (Source (u,pl,mlwtt,mlwtm) watches) = do
       -- Feed all the non-wildcarded watches to the watch dog so
       -- timeouts are meaningful from zero state.
       feedStartup _ _ [] = pure ()
-      feedStartup wd mc (Watch t _ _:xs)
+      feedStartup wd mc (Watch t i _:xs)
+        | i == 0             = feedStartup wd mc xs
         | "#" `isSuffixOf` t = feedStartup wd mc xs
         | "+/" `isInfixOf` t = feedStartup wd mc xs
         | "/+" `isInfixOf` t = feedStartup wd mc xs

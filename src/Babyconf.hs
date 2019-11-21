@@ -71,7 +71,7 @@ parseSource = do
     qstr = between "\"" "\"" (some $ noneOf ['"'])
            <|> between "'" "'" (some $ noneOf ['\''])
 
-    time = do
+    time = 0 <$ "instant" <|> do
       b <- L.decimal
       m <- seconds <$ "s" <|> minutes <$ "m" <|> hours <$ "h" <|> pure seconds
       pure (m b)
