@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 
@@ -5,9 +6,12 @@ module Main where
 
 import           Control.Concurrent         (threadDelay)
 import           Control.Concurrent.Async   (mapConcurrently_)
-import           Control.Exception          (SomeException, bracket, catch)
+import           Control.Exception          (SomeException)
 import           Control.Lens               ((&), (.~))
-import           Control.Monad              (forever, mapM, void, when)
+import           Control.Monad              (forever, void, when)
+import           Control.Monad.Catch        (catch, bracket)
+import           Control.Monad.IO.Class     (MonadIO (..))
+import           Control.Monad.Reader       (ReaderT (..), ask, runReaderT)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.HashMap.Strict        (HashMap)
@@ -68,6 +72,19 @@ options = Options
     mt = maybeReader $ pure.pure.pack
     mb = maybeReader $ pure.pure . BC.pack
 
+data Env = Env {
+  pushoverConf :: PushoverConf
+  , cliOpts    :: Options
+  }
+
+type Babysitter = ReaderT Env IO
+
+askPushoverConf :: Babysitter PushoverConf
+askPushoverConf = pushoverConf <$> ask
+
+askOpts :: Babysitter Options
+askOpts = cliOpts <$> ask
+
 timedout :: PushoverConf -> Action -> MQTTClient -> Event -> Text -> IO ()
 
 -- Setting values.
@@ -106,8 +123,8 @@ timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
 
       users' = map (umap Map.!) users
 
-withMQTT :: URI -> Protocol -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> IO ()
-withMQTT u pl mlwtt mlwtm cb f = bracket connto normalDisconnect go
+withMQTT :: URI -> Protocol -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> Babysitter ()
+withMQTT u pl mlwtt mlwtm cb f = liftIO $ bracket connto normalDisconnect go
 
   where
     mpl MQTT311 = Protocol311
@@ -125,40 +142,58 @@ withMQTT u pl mlwtt mlwtm cb f = bracket connto normalDisconnect go
       r <- waitForClient mc
       infoM rootLoggerName $ mconcat ["Disconnected from ", show u, " ", show r]
 
+class Stringy a where string :: a -> String
 
-runMQTTWatcher :: PushoverConf -> Source -> IO ()
-runMQTTWatcher pc (Source (u,pl,mlwtt,mlwtm) watches) = do
+instance Stringy [Char] where string = id
+instance Stringy Text where string = unpack
+
+logInfo :: MonadIO m => Stringy a => a -> m ()
+logInfo = liftIO . infoM rootLoggerName . string
+
+logErr :: MonadIO m => Stringy a => a -> m ()
+logErr = liftIO . errorM rootLoggerName . string
+
+delay :: MonadIO m => Int -> m ()
+delay = liftIO . threadDelay
+
+alertNow :: [Watch] -> Text -> Text -> Babysitter ()
+alertNow insts t m = do
+  logInfo $ mconcat ["Instant alert: ", show users, " ", show t, ", ", show m]
+  (PushoverConf tok um) <- askPushoverConf
+  let dests = findUsers um
+  mapM_ (\usr -> let msg = (message tok usr t){_title="Babysitter Now: " <> t, _body=m} in
+            void $ liftIO $ sendMessage msg) dests
+    where
+      users = concatMap ufunc insts
+      ufunc (Watch _ _ (ActAlert x)) = x
+      ufunc _                        = []
+      findUsers umap = map (umap Map.!) users
+
+runMQTTWatcher :: Source -> Babysitter ()
+runMQTTWatcher (Source (u,pl,mlwtt,mlwtm) watches) = do
+  pc <- askPushoverConf
   let (instant, timeouts) = partition (\(Watch _ i _) -> i == 0) watches
       toThings = map (\(Watch t i action) -> (t, (i, timedout pc action))) timeouts
       allThings = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
-  wd <- mkWatchDogs (bestMatch toThings)
-  feedStartup wd undefined timeouts
+  wd <- liftIO $ mkWatchDogs (bestMatch toThings)
+  liftIO $ feedStartup wd undefined timeouts
 
   forever $ do
-    catch (withMQTT u pl mlwtt mlwtm (gotMsg (wd, instant)) (subAndWait allThings)) (
-      \e -> errorM rootLoggerName $ mconcat ["connection to ", show u, ": ",
-                                             show (e :: SomeException)])
+    env <- ask
+    catch (withMQTT u pl mlwtt mlwtm (gotMsg env (wd, instant)) (subAndWait allThings)) (
+      \e -> logErr $ mconcat ["connection to ", show u, ": ",
+                              show (e :: SomeException)])
 
-    threadDelay (seconds 5)
+    delay (seconds 5)
 
     where
-      gotMsg _ _ _ "" _ = pure ()
-      gotMsg (wd, instant) c t m _
-        | instMatch = alertMsg (TE.decodeUtf8 . BL.toStrict $ m)
+      gotMsg _ _ _ _ "" _ = pure ()
+      gotMsg env (wd, instant) c t m _
+        | instMatch = runReaderT (alertNow insts t (TE.decodeUtf8 . BL.toStrict $ m)) env
         | otherwise = feed wd t c
         where
           insts = filter (\(Watch x _ _) -> x `match` t) instant
           instMatch = (not . null) insts
-          alertMsg :: Text -> IO ()
-          alertMsg b = do
-            infoM rootLoggerName $ mconcat ["Instant alert: ", show users, " ", show t, ", ", show m]
-            mapM_ (\usr -> let msg = (message tok usr t){_title="Babysitter Now: " <> t, _body=b} in
-                             void $ sendMessage msg) users'
-          users = concatMap ufunc insts
-          users' = map (umap Map.!) users
-          ufunc (Watch _ _ (ActAlert x)) = x
-          ufunc _                        = []
-          (tok, umap) = let PushoverConf t' m' = pc in (t', m')
 
       bestMatch [] t = error $ "no good match for " <> unpack t
       bestMatch ((x,r):xs) t
@@ -187,8 +222,8 @@ instance QueryResults TSOnly where
 
 data Status = Clear | Alerting deriving(Eq, Show)
 
-runInfluxWatcher :: PushoverConf -> Source -> IO ()
-runInfluxWatcher pc (Source (u,_,_,_) watches) = do
+runInfluxWatcher :: Source -> Babysitter ()
+runInfluxWatcher (Source (u,_,_,_) watches) = do
   let (Just uauth) = uriAuthority u
       h = uriRegName uauth
       dbname = drop 1 $ uriPath u
@@ -199,20 +234,20 @@ runInfluxWatcher pc (Source (u,_,_,_) watches) = do
   where
     periodically st f = do
       st' <- f st
-      threadDelay (seconds 60)
+      delay (seconds 60)
       periodically st' f
 
-    watchAll :: QueryParams -> [Watch] -> Map Text Status -> IO (Map Text Status)
-    watchAll qp ws m = Map.fromList . Prelude.concat <$> mapM watchOne ws
+    watchAll :: QueryParams -> [Watch] -> Map Text Status -> Babysitter (Map Text Status)
+    watchAll qp ws m = Map.fromList . Prelude.concat <$> traverse watchOne ws
       where
-        watchOne :: Watch -> IO [(Text,Status)]
+        watchOne :: Watch -> Babysitter [(Text,Status)]
         watchOne w@(Watch t _ _) = do
           let q = fromString . unpack $ t
-          r <- IDB.query qp q :: IO (V.Vector TSOnly)
-          now <- getCurrentTime
-          mapM (maybeAlert w now) (V.toList r)
+          r <- liftIO (IDB.query qp q :: IO (V.Vector TSOnly))
+          now <- liftIO getCurrentTime
+          traverse (maybeAlert w now) (V.toList r)
 
-        maybeAlert :: Watch -> UTCTime -> TSOnly -> IO (Text, Status)
+        maybeAlert :: Watch -> UTCTime -> TSOnly -> Babysitter (Text, Status)
         maybeAlert (Watch t i act) now (TSOnly x tags) = do
           let age = truncate $ diffUTCTime now x
               firing = seconds age > i
@@ -220,7 +255,8 @@ runInfluxWatcher pc (Source (u,_,_,_) watches) = do
               ev = if newst == Alerting then TimedOut else Returned
               msg = if null tags then t else (t <> tagstr tags)
               shouldAlert = firing == (Map.findWithDefault Clear msg m == Clear)
-          when shouldAlert $ timedout pc act undefined ev msg
+          pc <- askPushoverConf
+          when shouldAlert $ liftIO $ timedout pc act undefined ev msg
           pure $ (msg, newst)
 
         tagstr :: HashMap Text Text -> Text
@@ -230,19 +266,22 @@ runInfluxWatcher pc (Source (u,_,_,_) watches) = do
                                           (intercalate ", " . map (\(k,v) -> k <> "=" <> v) . HM.toList) t,
                                           "]"]
 
-runWatcher :: Options -> PushoverConf -> Source -> IO ()
-runWatcher Options{..} pc src@(Source (u,_,_,_) _)
-  | isMQTT = runMQTTWatcher pc src
-  | isInflux = threadDelay (seconds optDelaySeconds) >> runInfluxWatcher pc src
+runWatcher :: Source -> Babysitter ()
+runWatcher src@(Source (u,_,_,_) _)
+  | isMQTT = runMQTTWatcher src
+  | isInflux = (optDelaySeconds <$> askOpts) >>= delay >> runInfluxWatcher src
   | otherwise = fail ("Don't know how to watch: " <> show u)
 
   where isMQTT = uriScheme u `elem` ["mqtt:", "mqtts:"]
         isInflux = uriScheme u == "influx:"
 
+runTrans :: PushoverConf -> Options -> Babysitter () -> IO ()
+runTrans pc opts f = runReaderT f (Env pc opts)
+
 run :: Options -> IO ()
 run opts@Options{..} = do
   (Babyconf dests srcs) <- parseConfFile optConfFile
-  mapConcurrently_ (runWatcher opts dests) srcs
+  mapConcurrently_ (runTrans dests opts . runWatcher) srcs
 
 main :: IO ()
 main = do

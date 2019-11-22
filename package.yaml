@@ -54,6 +54,9 @@ executables:
     dependencies:
     - babysitter
     - hslogger
+    - transformers
+    - mtl
+    - exceptions
 
 tests:
   babysitter-test:
