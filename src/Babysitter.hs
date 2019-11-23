@@ -33,7 +33,7 @@ data WatchDogs a b = WatchDogs {
 
 data Event = Created | Returned | TimedOut deriving (Eq, Show)
 
-mkWatchDogs :: (Ord a, Eq a) => (a -> (Int, AlertFun a b)) -> IO (WatchDogs a b)
+mkWatchDogs :: Ord a => (a -> (Int, AlertFun a b)) -> IO (WatchDogs a b)
 mkWatchDogs _cfgFor = do
   _st <- newTVarIO mempty
   _seen <- newTVarIO mempty
@@ -48,7 +48,7 @@ heel WatchDogs{..} = do
     pure m
   mapM_ (\(a,_,_) -> cancel a) $ Map.elems m
 
-feed :: (Ord a, Eq a) => WatchDogs a b -> a -> b -> IO ()
+feed :: Ord a => WatchDogs a b -> a -> b -> IO ()
 feed WatchDogs{..} t a = do
   m <- readTVarIO _st
   case Map.lookup t m of

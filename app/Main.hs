@@ -19,7 +19,7 @@ import qualified Data.HashMap.Strict        as HM
 import           Data.List                  (partition)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust)
+import           Data.Maybe                 (fromMaybe, fromJust)
 import           Data.Semigroup             ((<>))
 import           Data.String                (fromString)
 import           Data.Text                  (Text, concat, intercalate,
@@ -224,7 +224,7 @@ data Status = Clear | Alerting deriving(Eq, Show)
 
 runInfluxWatcher :: Source -> Babysitter ()
 runInfluxWatcher (Source (u,_,_,_) watches) = do
-  let (Just uauth) = uriAuthority u
+  let uauth = fromMaybe (error "bad url auth") $ uriAuthority u
       h = uriRegName uauth
       dbname = drop 1 $ uriPath u
       qp = queryParams (fromString dbname) & server.host .~ fromString h

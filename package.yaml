@@ -41,6 +41,13 @@ library:
   source-dirs: src
   ghc-options:
   - -Wall
+  - -Wall
+  - -Wcompat
+  - -Widentities
+  - -Wincomplete-record-updates
+  - -Wincomplete-uni-patterns
+  - -Wpartial-fields
+  - -Wredundant-constraints
 
 executables:
   babysitter:
@@ -48,6 +55,13 @@ executables:
     source-dirs:         app
     ghc-options:
     - -Wall
+    - -Wall
+    - -Wcompat
+    - -Widentities
+    - -Wincomplete-record-updates
+    - -Wincomplete-uni-patterns
+    - -Wpartial-fields
+    - -Wredundant-constraints
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N

@@ -8,6 +8,7 @@ import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.UTF8  as BU
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
+import           Data.Maybe                 (fromMaybe)
 import           Data.Text                  (Text, pack)
 import           Data.Void                  (Void)
 import           Text.Megaparsec            (Parsec, between, eof, noneOf,
@@ -55,7 +56,7 @@ parseSource = do
       _ <- "src" *> space
       ustr <- some (noneOf ['\n', ' '])
       pl <- option MQTT311 (try prot)
-      let (Just u) = parseURI ustr
+      let u = fromMaybe (error "bad url") $ parseURI ustr
       (lwtt,lwtm) <- option (Nothing, Nothing) (try plwt)
       pure (u, pl, lwtt, lwtm)
 
