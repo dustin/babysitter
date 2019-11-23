@@ -89,7 +89,7 @@ timedout :: PushoverConf -> Action -> MQTTClient -> Event -> Text -> IO ()
 
 -- Setting values.
 timedout _ (ActSet t m r) mc ev topic = do
-  infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> set " <> unpack t
+  logInfo $ unpack topic <> " - " <> show ev <> " -> set " <> unpack t
   to ev
     where
       to TimedOut = publishq mc t m r QoS2 mempty
@@ -97,17 +97,17 @@ timedout _ (ActSet t m r) mc ev topic = do
 
 -- Clearing values.
 timedout _ ActDelete mc ev topic = do
-  infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> delete"
+  logInfo $ unpack topic <> " - " <> show ev <> " -> delete"
   to ev
     where
       to TimedOut = do
-        infoM rootLoggerName $ "deleting " <> unpack topic <> " after timeout"
+        logInfo $ "deleting " <> unpack topic <> " after timeout"
         publishq mc topic "" True QoS2 mempty
       to _        = pure ()
 
 -- Alerting via pushover.
 timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
-  infoM rootLoggerName $ unpack topic <> " - " <> show ev <> " -> " <> show users
+  logInfo $ unpack topic <> " - " <> show ev <> " -> " <> show users
   to ev
 
     where
@@ -140,7 +140,7 @@ withMQTT u pl mlwtt mlwtm cb f = liftIO $ bracket connto normalDisconnect go
     go mc = do
       f mc
       r <- waitForClient mc
-      infoM rootLoggerName $ mconcat ["Disconnected from ", show u, " ", show r]
+      logInfo $ mconcat ["Disconnected from ", show u, " ", show r]
 
 class Stringy a where string :: a -> String
 
@@ -210,9 +210,9 @@ runMQTTWatcher (Source (u,pl,mlwtt,mlwtm) watches) = do
         | otherwise          = feed wd t mc >> feedStartup wd mc xs
 
       subAndWait things mc = do
-        infoM rootLoggerName $ mconcat ["Subscribing at ", show u, " - ", show [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things]]
+        logInfo $ mconcat ["Subscribing at ", show u, " - ", show [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things]]
         subrv <- subscribe mc [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things] mempty
-        infoM rootLoggerName $ mconcat ["Sub response from ", show u, ": ", show subrv]
+        logInfo $ mconcat ["Sub response from ", show u, ": ", show subrv]
 
 data TSOnly = TSOnly UTCTime (HashMap Text Text) deriving(Show)
 
