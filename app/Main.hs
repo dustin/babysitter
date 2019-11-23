@@ -11,7 +11,7 @@ import           Control.Lens               ((&), (.~))
 import           Control.Monad              (forever, void, when)
 import           Control.Monad.Catch        (catch, bracket)
 import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.Reader       (ReaderT (..), ask, runReaderT)
+import           Control.Monad.Reader       (ReaderT (..), ask, asks, runReaderT)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.HashMap.Strict        (HashMap)
@@ -80,10 +80,10 @@ data Env = Env {
 type Babysitter = ReaderT Env IO
 
 askPushoverConf :: Babysitter PushoverConf
-askPushoverConf = pushoverConf <$> ask
+askPushoverConf = asks pushoverConf
 
 askOpts :: Babysitter Options
-askOpts = cliOpts <$> ask
+askOpts = asks cliOpts
 
 timedout :: PushoverConf -> Action -> MQTTClient -> Event -> Text -> IO ()
 
