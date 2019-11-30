@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
@@ -9,9 +10,15 @@ import           Control.Concurrent.Async   (mapConcurrently_)
 import           Control.Exception          (SomeException)
 import           Control.Lens               ((&), (.~))
 import           Control.Monad              (forever, void, when)
-import           Control.Monad.Catch        (catch, bracket)
+import           Control.Monad.Catch        (bracket, catch)
 import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.Reader       (ReaderT (..), ask, asks, runReaderT)
+import           Control.Monad.IO.Unlift    (withRunInIO)
+import           Control.Monad.Logger       (LogLevel (..), LoggingT,
+                                             MonadLogger, ToLogStr (..),
+                                             logWithoutLoc, runStderrLoggingT,
+                                             toLogStr)
+import           Control.Monad.Reader       (MonadReader, ReaderT (..), asks,
+                                             runReaderT)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.HashMap.Strict        (HashMap)
@@ -19,7 +26,7 @@ import qualified Data.HashMap.Strict        as HM
 import           Data.List                  (partition)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromMaybe, fromJust)
+import           Data.Maybe                 (fromJust, fromMaybe)
 import           Data.Semigroup             ((<>))
 import           Data.String                (fromString)
 import           Data.Text                  (Text, concat, intercalate,
@@ -39,10 +46,7 @@ import           Options.Applicative        (Parser, auto, execParser, fullDesc,
                                              maybeReader, option, progDesc,
                                              showDefault, strOption, value,
                                              (<**>))
-import           System.Log.Logger          (Priority (INFO), errorM, infoM,
-                                             rootLoggerName, setLevel,
-                                             updateGlobalLogger)
-import           System.Timeout             (timeout)
+import           UnliftIO.Timeout           (timeout)
 
 
 import           Babyconf
@@ -77,22 +81,22 @@ data Env = Env {
   , cliOpts    :: Options
   }
 
-type Babysitter = ReaderT Env IO
+type Babysitter = LoggingT (ReaderT Env IO)
 
-askPushoverConf :: Babysitter PushoverConf
+askPushoverConf :: MonadReader Env m => m PushoverConf
 askPushoverConf = asks pushoverConf
 
-askOpts :: Babysitter Options
+askOpts :: MonadReader Env m => m Options
 askOpts = asks cliOpts
 
-timedout :: PushoverConf -> Action -> MQTTClient -> Event -> Text -> IO ()
+timedout :: PushoverConf -> Action -> MQTTClient -> Event -> Text -> Babysitter ()
 
 -- Setting values.
 timedout _ (ActSet t m r) mc ev topic = do
-  logInfo $ unpack topic <> " - " <> show ev <> " -> set " <> unpack t
+  logInfo $ toLogStr topic <> " - " <> (toLogStr . show) ev <> " -> set " <> toLogStr t
   to ev
     where
-      to TimedOut = publishq mc t m r QoS2 mempty
+      to TimedOut = liftIO $ publishq mc t m r QoS2 mempty
       to _        = pure ()
 
 -- Clearing values.
@@ -102,7 +106,7 @@ timedout _ ActDelete mc ev topic = do
     where
       to TimedOut = do
         logInfo $ "deleting " <> unpack topic <> " after timeout"
-        publishq mc topic "" True QoS2 mempty
+        liftIO $ publishq mc topic "" True QoS2 mempty
       to _        = pure ()
 
 -- Alerting via pushover.
@@ -114,17 +118,17 @@ timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
       to TimedOut =
         mapM_ (\usr -> let m = (message tok usr (topic <> " timed out"))
                                {_title="Babysitter:  Timed Out"} in
-                         void $ sendMessage m) users'
+                         void $ liftIO $ sendMessage m) users'
       to Returned =
         mapM_ (\usr -> let m = (message tok usr (topic <> " came back"))
                                {_title="Babysitter:  Came Back"} in
-                         void $ sendMessage m) users'
+                         void $ liftIO $ sendMessage m) users'
       to _ = pure ()
 
       users' = map (umap Map.!) users
 
 withMQTT :: URI -> Protocol -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> Babysitter ()
-withMQTT u pl mlwtt mlwtm cb f = liftIO $ bracket connto normalDisconnect go
+withMQTT u pl mlwtt mlwtm cb f = withRunInIO $ \unl -> bracket connto normalDisconnect (go unl)
 
   where
     mpl MQTT311 = Protocol311
@@ -137,21 +141,22 @@ withMQTT u pl mlwtt mlwtm cb f = liftIO $ bracket connto normalDisconnect go
 
     connto = timeout 15000000 conn >>= maybe (fail ("timed out connecting to " <> show u)) pure
 
-    go mc = do
+    go unl mc = do
       f mc
       r <- waitForClient mc
-      logInfo $ mconcat ["Disconnected from ", show u, " ", show r]
+      void . unl . logInfo $ mconcat ["Disconnected from ", show u, " ", show r]
 
-class Stringy a where string :: a -> String
+logAt :: (MonadLogger m, ToLogStr msg) => LogLevel -> msg -> m ()
+logAt l = logWithoutLoc "" l . toLogStr
 
-instance Stringy [Char] where string = id
-instance Stringy Text where string = unpack
+logErr :: (MonadLogger m, ToLogStr msg) => msg -> m ()
+logErr = logAt LevelError
 
-logInfo :: MonadIO m => Stringy a => a -> m ()
-logInfo = liftIO . infoM rootLoggerName . string
+logInfo :: (MonadLogger m, ToLogStr msg) => msg -> m ()
+logInfo = logAt LevelInfo
 
-logErr :: MonadIO m => Stringy a => a -> m ()
-logErr = liftIO . errorM rootLoggerName . string
+logDbg :: (MonadLogger m, ToLogStr msg) => msg -> m ()
+logDbg = logAt LevelDebug
 
 delay :: MonadIO m => Int -> m ()
 delay = liftIO . threadDelay
@@ -176,21 +181,21 @@ runMQTTWatcher (Source (u,pl,mlwtt,mlwtm) watches) = do
       toThings = map (\(Watch t i action) -> (t, (i, timedout pc action))) timeouts
       allThings = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
   wd <- liftIO $ mkWatchDogs (bestMatch toThings)
-  liftIO $ feedStartup wd undefined timeouts
+  feedStartup wd undefined timeouts
 
   forever $ do
-    env <- ask
-    catch (withMQTT u pl mlwtt mlwtm (gotMsg env (wd, instant)) (subAndWait allThings)) (
-      \e -> logErr $ mconcat ["connection to ", show u, ": ",
-                              show (e :: SomeException)])
+    withRunInIO $ \unl ->
+                    catch (unl $ withMQTT u pl mlwtt mlwtm (gotMsg unl (wd, instant)) (subAndWait unl allThings)) (
+      \e -> void . unl . logErr $ mconcat ["connection to ", show u, ": ",
+                                           show (e :: SomeException)])
 
     delay (seconds 5)
 
     where
       gotMsg _ _ _ _ "" _ = pure ()
-      gotMsg env (wd, instant) c t m _
-        | instMatch = runReaderT (alertNow insts t (TE.decodeUtf8 . BL.toStrict $ m)) env
-        | otherwise = feed wd t c
+      gotMsg unl (wd, instant) c t m _
+        | instMatch = unl $ alertNow insts t (TE.decodeUtf8 . BL.toStrict $ m)
+        | otherwise = unl $ feed wd t c
         where
           insts = filter (\(Watch x _ _) -> x `match` t) instant
           instMatch = (not . null) insts
@@ -209,9 +214,9 @@ runMQTTWatcher (Source (u,pl,mlwtt,mlwtm) watches) = do
         | "/+" `isInfixOf` t = feedStartup wd mc xs
         | otherwise          = feed wd t mc >> feedStartup wd mc xs
 
-      subAndWait things mc = do
+      subAndWait unl things mc = unl $ do
         logInfo $ mconcat ["Subscribing at ", show u, " - ", show [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things]]
-        subrv <- subscribe mc [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things] mempty
+        subrv <- liftIO $  subscribe mc [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things] mempty
         logInfo $ mconcat ["Sub response from ", show u, ": ", show subrv]
 
 data TSOnly = TSOnly UTCTime (HashMap Text Text) deriving(Show)
@@ -256,7 +261,7 @@ runInfluxWatcher (Source (u,_,_,_) watches) = do
               msg = if null tags then t else (t <> tagstr tags)
               shouldAlert = firing == (Map.findWithDefault Clear msg m == Clear)
           pc <- askPushoverConf
-          when shouldAlert $ liftIO $ timedout pc act undefined ev msg
+          when shouldAlert $ timedout pc act undefined ev msg
           pure $ (msg, newst)
 
         tagstr :: HashMap Text Text -> Text
@@ -276,7 +281,7 @@ runWatcher src@(Source (u,_,_,_) _)
         isInflux = uriScheme u == "influx:"
 
 runTrans :: PushoverConf -> Options -> Babysitter () -> IO ()
-runTrans pc opts f = runReaderT f (Env pc opts)
+runTrans pc opts f = runReaderT (runStderrLoggingT f) (Env pc opts)
 
 run :: Options -> IO ()
 run opts@Options{..} = do
@@ -284,9 +289,7 @@ run opts@Options{..} = do
   mapConcurrently_ (runTrans dests opts . runWatcher) srcs
 
 main :: IO ()
-main = do
-  updateGlobalLogger rootLoggerName (setLevel INFO)
-  run =<< execParser opts
+main = run =<< execParser opts
 
   where opts = info (options <**> helper)
           ( fullDesc <> progDesc "Watch the things.")

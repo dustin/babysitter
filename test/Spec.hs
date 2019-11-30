@@ -28,7 +28,7 @@ testWatchDoggin = do
   assertEqual "" keys (reverse l)
 
   where
-    tod :: TVar [Char] -> AlertFun Char ()
+    tod :: TVar [Char] -> AlertFun Char () IO
     tod x _ TimedOut t = (atomically $ modifyTVar' x (t:))
     tod _ _ e t        = pure ()
 
@@ -44,7 +44,7 @@ testHeelin = do
   assertEqual "" 0 r
 
   where
-    tod :: TVar Int -> AlertFun Char ()
+    tod :: TVar Int -> AlertFun Char () IO
     tod x _ TimedOut t = (atomically $ modifyTVar' x succ)
     tod _ _ e t        = pure ()
 
@@ -64,7 +64,7 @@ testReturn = do
   pure ()
 
   where
-    tod :: TVar Int -> TVar Int -> AlertFun Char ()
+    tod :: TVar Int -> TVar Int -> AlertFun Char () IO
     tod tv _ _ TimedOut t = (atomically $ modifyTVar' tv succ)
     tod _ rv _ Returned t = (atomically $ modifyTVar' rv succ)
     tod _ _ _ e t         = pure ()

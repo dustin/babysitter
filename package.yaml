@@ -36,6 +36,8 @@ dependencies:
 - influxdb
 - vector
 - time
+- unliftio
+- unliftio-core
 
 library:
   source-dirs: src
@@ -67,10 +69,10 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - babysitter
-    - hslogger
     - transformers
     - mtl
     - exceptions
+    - monad-logger
 
 tests:
   babysitter-test:
