@@ -6,7 +6,6 @@
 module Main where
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Concurrent.Async   (mapConcurrently_)
 import           Control.Exception          (SomeException)
 import           Control.Lens               ((&), (.~))
 import           Control.Monad              (forever, void, when)
@@ -46,6 +45,7 @@ import           Options.Applicative        (Parser, auto, execParser, fullDesc,
                                              maybeReader, option, progDesc,
                                              showDefault, strOption, value,
                                              (<**>))
+import           UnliftIO.Async             (mapConcurrently_)
 import           UnliftIO.Timeout           (timeout)
 
 
@@ -81,7 +81,7 @@ data Env = Env {
   , cliOpts    :: Options
   }
 
-type Babysitter = LoggingT (ReaderT Env IO)
+type Babysitter = ReaderT Env (LoggingT IO)
 
 askPushoverConf :: MonadReader Env m => m PushoverConf
 askPushoverConf = asks pushoverConf
@@ -280,13 +280,13 @@ runWatcher src@(Source (u,_,_,_) _)
   where isMQTT = uriScheme u `elem` ["mqtt:", "mqtts:"]
         isInflux = uriScheme u == "influx:"
 
-runTrans :: PushoverConf -> Options -> Babysitter () -> IO ()
-runTrans pc opts f = runReaderT (runStderrLoggingT f) (Env pc opts)
+runTrans :: PushoverConf -> Options -> ReaderT Env m a -> m a
+runTrans pc opts f = runReaderT f (Env pc opts)
 
 run :: Options -> IO ()
 run opts@Options{..} = do
   (Babyconf dests srcs) <- parseConfFile optConfFile
-  mapConcurrently_ (runTrans dests opts . runWatcher) srcs
+  runStderrLoggingT $ mapConcurrently_ (runTrans dests opts . runWatcher) srcs
 
 main :: IO ()
 main = run =<< execParser opts
