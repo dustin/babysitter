@@ -1,10 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import           Control.Concurrent     (threadDelay)
-import           Control.Concurrent.STM (TChan, TVar, atomically, modifyTVar',
-                                         newTChan, newTChanIO, newTVarIO,
-                                         readTChan, readTVar, readTVarIO, retry,
-                                         writeTChan, writeTVar)
+import           Control.Concurrent.STM (TChan, TVar, atomically, modifyTVar', newTChan, newTChanIO, newTVarIO,
+                                         readTChan, readTVar, readTVarIO, retry, writeTChan, writeTVar)
 import           Control.Monad          (foldM_)
 import           Data.Void              (Void)
 
@@ -19,9 +17,9 @@ testWatchDoggin :: Assertion
 testWatchDoggin = do
   x <- newTVarIO []
   let keys = "abcdefg" :: String
-  wd <- mkWatchDogs (const (millis 100, tod x))
+  wd <- mkWatchDogs (const (millis 500, tod x))
   foldM_ (\_ k -> feed wd k ()) undefined keys
-  foldM_ (\_ k -> feed wd k () >> threadDelay (millis 5)) undefined keys
+  foldM_ (\_ k -> feed wd k () >> threadDelay (millis 25)) undefined keys
   l <- atomically $ do
     l <- readTVar x
     if length l < length keys then retry else pure l
