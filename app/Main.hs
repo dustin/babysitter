@@ -26,7 +26,6 @@ import           Data.List                  (partition)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, fromMaybe)
-import           Data.Semigroup             ((<>))
 import           Data.String                (fromString)
 import           Data.Text                  (Text, concat, intercalate,
                                              isInfixOf, isSuffixOf, pack,
@@ -222,8 +221,8 @@ runMQTTWatcher (Source (u,pl,mlwtt,mlwtm) watches) = do
 data TSOnly = TSOnly UTCTime (HashMap Text Text) deriving(Show)
 
 instance QueryResults TSOnly where
-  parseResults prec = parseResultsWithDecoder strictDecoder $ \_ m columns fields ->
-    TSOnly <$> (getField "time" columns fields >>= parseUTCTime prec) <*> pure m
+  parseMeasurement prec _name tags columns fields =
+    TSOnly <$> (getField "time" columns fields >>= parseUTCTime prec) <*> pure tags
 
 data Status = Clear | Alerting deriving(Eq, Show)
 
