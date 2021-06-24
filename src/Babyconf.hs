@@ -4,15 +4,14 @@
 module Babyconf (parseConfFile, Protocol(..), Babyconf(..), Source(..), Watch(..), Action(..), PushoverConf(..)) where
 
 import           Control.Applicative        (empty, (<|>))
+import           Control.Monad              (when)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.UTF8  as BU
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromMaybe)
 import           Data.Text                  (Text, pack)
 import           Data.Void                  (Void)
-import           Text.Megaparsec            (Parsec, between, eof, noneOf,
-                                             option, parse, sepBy, some, try)
+import           Text.Megaparsec            (Parsec, between, eof, noneOf, option, parse, sepBy, some, try)
 import           Text.Megaparsec.Char       (alphaNumChar, space, space1)
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Text.Megaparsec.Error      (errorBundlePretty)
@@ -54,12 +53,18 @@ parseSource = uncurry Source <$> itemList src watch
 
   where
     src = do
-      _ <- "src" *> space
-      ustr <- some (noneOf ['\n', ' '])
+      u <- lexeme "src" *> auri
       pl <- option MQTT311 (try prot)
-      let u = fromMaybe (error "bad url") $ parseURI ustr
       (lwtt,lwtm) <- option (Nothing, Nothing) (try plwt)
       pure (u, pl, lwtt, lwtm)
+
+    auri :: Parser URI
+    auri = do
+      ustr <- some (noneOf ['\n', ' '])
+      u <- maybe (fail "bad url") pure (parseURI ustr)
+      let sch = uriScheme u
+      when (sch `notElem` ["mqtt:", "mqtts:", "influx:"]) $ fail ("invalid scheme: " <> show sch)
+      pure u
 
     watch = Watch . pack <$> (lexeme "watch" *> lexeme qstr) <*> (lexeme time <* lexeme "->") <*> pact
 

@@ -4,17 +4,17 @@ import           Control.Concurrent     (threadDelay)
 import           Control.Concurrent.STM (TChan, TVar, atomically, modifyTVar', newTChan, newTChanIO, newTVarIO,
                                          readTChan, readTVar, readTVarIO, retry, writeTChan, writeTVar)
 import           Control.Monad          (foldM_)
+import qualified Data.Map.Strict        as Map
 import           Data.Void              (Void)
-import qualified Data.Map.Strict as Map
-import Network.URI
+import           Network.URI
 
 import           Test.QuickCheck
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import           Test.Tasty.QuickCheck  as QC
 
+import           Babyconf
 import           Babysitter
-import Babyconf
 
 testWatchDoggin :: Assertion
 testWatchDoggin = do

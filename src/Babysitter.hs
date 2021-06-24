@@ -8,10 +8,8 @@ module Babysitter (
   ) where
 
 import           Control.Concurrent.Async (Async, async, cancel)
-import           Control.Concurrent.STM   (TChan, TVar, atomically, modifyTVar',
-                                           newTChanIO, newTVarIO, readTChan,
-                                           readTVar, readTVarIO, writeTChan,
-                                           writeTVar)
+import           Control.Concurrent.STM   (TChan, TVar, atomically, modifyTVar', newTChanIO, newTVarIO, readTChan,
+                                           readTVar, readTVarIO, writeTChan, writeTVar)
 import           Control.Monad            (unless, void)
 import           Control.Monad.IO.Class   (MonadIO (..))
 import           Control.Monad.IO.Unlift  (MonadUnliftIO, withRunInIO)
