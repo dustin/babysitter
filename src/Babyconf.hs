@@ -21,20 +21,20 @@ import           Network.URI
 
 type Parser = Parsec Void Text
 
-data Babyconf = Babyconf PushoverConf [Source] deriving(Show)
+data Babyconf = Babyconf PushoverConf [Source] deriving(Show, Eq)
 
 data Protocol = MQTT311 | MQTT5 deriving (Show, Eq)
 
-data Source = Source (URI, Protocol, Maybe Text, Maybe BL.ByteString) [Watch] deriving(Show)
+data Source = Source (URI, Protocol, Maybe Text, Maybe BL.ByteString) [Watch] deriving(Show, Eq)
 
 data Action = ActAlert [Text]
             | ActSet Text BL.ByteString Bool
             | ActDelete
-            deriving (Show)
+            deriving (Show, Eq)
 
-data Watch = Watch Text Int Action deriving(Show)
+data Watch = Watch Text Int Action deriving(Show, Eq)
 
-data PushoverConf = PushoverConf Text (Map Text Text) deriving(Show)
+data PushoverConf = PushoverConf Text (Map Text Text) deriving(Show, Eq)
 
 parseBabyconf :: Parser Babyconf
 parseBabyconf = do

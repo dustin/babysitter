@@ -5,6 +5,8 @@ import           Control.Concurrent.STM (TChan, TVar, atomically, modifyTVar', n
                                          readTChan, readTVar, readTVarIO, retry, writeTChan, writeTVar)
 import           Control.Monad          (foldM_)
 import           Data.Void              (Void)
+import qualified Data.Map.Strict as Map
+import Network.URI
 
 import           Test.QuickCheck
 import           Test.Tasty
@@ -12,6 +14,7 @@ import           Test.Tasty.HUnit
 import           Test.Tasty.QuickCheck  as QC
 
 import           Babysitter
+import Babyconf
 
 testWatchDoggin :: Assertion
 testWatchDoggin = do
@@ -67,12 +70,23 @@ testReturn = do
     tod _ rv _ Returned t = (atomically $ modifyTVar' rv succ)
     tod _ _ _ e t         = pure ()
 
+testConfig :: Assertion
+testConfig = do
+  let Just u = parseURI "mqtt://test.mosquitto.org/#babysittertest"
+  c <- parseConfFile "test/test.conf"
+  assertEqual "test.conf" (Babyconf (PushoverConf "pushoverapikey"
+                                     (Map.fromList [("dustin","mypushoverkey")]))
+                            [Source (u, MQTT5, Just "errors",
+                                     Just "babysitter \226\152\160")
+                              [Watch "tmp/#" 300000000 ActDelete,
+                               Watch "x/+/y" 1800000000 (ActAlert ["dustin"])]]) c
 
 tests :: [TestTree]
 tests = [
   tmout $ testCase "watchdog firing" testWatchDoggin,
   tmout $ testCase "watchdog heeling" testHeelin,
-  tmout $ testCase "return of the watchdog" testReturn
+  tmout $ testCase "return of the watchdog" testReturn,
+  testCase "test.conf" testConfig
   ]
 
   where tmout = localOption (Timeout 5000000 "5s")
