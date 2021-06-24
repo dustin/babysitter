@@ -36,20 +36,21 @@ data Watch = Watch Text Int Action deriving(Show, Eq)
 
 data PushoverConf = PushoverConf Text (Map Text Text) deriving(Show, Eq)
 
+sc :: Parser ()
+sc = L.space space1 (L.skipLineComment "#" <* space) (L.skipBlockComment "/*" "*/")
+
+lexeme :: Parser a -> Parser a
+lexeme = L.lexeme sc
+
 parseBabyconf :: Parser Babyconf
-parseBabyconf = do
-  pc <- parsePushoverConf <* space
-  srcs <- some parseSource <* eof
-  pure $ Babyconf pc srcs
+parseBabyconf = Babyconf <$> lexeme parsePushoverConf <*> some parseSource <* eof
 
 -- Eat whitspace around a parser.
 spacey :: Parser a -> Parser a
 spacey f = space *> f <* space
 
 parseSource :: Parser Source
-parseSource = do
-  (u, ws) <- itemList src watch
-  pure $ Source u ws
+parseSource = uncurry Source <$> itemList src watch
 
   where
     src = do
@@ -60,12 +61,7 @@ parseSource = do
       (lwtt,lwtm) <- option (Nothing, Nothing) (try plwt)
       pure (u, pl, lwtt, lwtm)
 
-    watch = do
-      t <- "watch" *> spacey qstr
-      tm <- time <* space <* "->" <* space
-      act <- pact
-
-      pure $ Watch (pack t) tm act
+    watch = Watch . pack <$> (lexeme "watch" *> lexeme qstr) <*> (lexeme time <* lexeme "->") <*> pact
 
     prot = spacey (MQTT5 <$ "mqtt5")
 
@@ -111,12 +107,10 @@ parsePushoverConf = do
 
   where
     pushover :: Parser Text
-    pushover = do
-      t <- "dest pushover " *> some (noneOf ['\n'])
-      pure (pack t)
+    pushover = pack <$> ("dest pushover " *> some (noneOf ['\n']))
 
     user :: Parser (Text,Text)
-    user = (,) <$> word <* space <*> word
+    user = (,) <$> lexeme word <*> word
 
 word :: Parser Text
 word = pack <$> some alphaNumChar
@@ -128,9 +122,7 @@ itemList :: Parser a -> Parser b ->  Parser (a, [b])
 itemList pa pb = L.nonIndented scn (L.indentBlock scn p)
   where
     scn = L.space space1 lineComment empty
-    p = do
-      header <- pa
-      return (L.IndentMany Nothing (return . (header, )) pb)
+    p = pa >>= \header -> pure (L.IndentMany Nothing (pure . (header, )) pb)
 
 parseFile :: Parser a -> String -> IO a
 parseFile f s = pack <$> readFile s >>= either (fail.errorBundlePretty) pure . parse f s
