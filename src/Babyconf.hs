@@ -44,18 +44,14 @@ lexeme = L.lexeme sc
 parseBabyconf :: Parser Babyconf
 parseBabyconf = Babyconf <$> lexeme parsePushoverConf <*> some parseSource <* eof
 
--- Eat whitspace around a parser.
-spacey :: Parser a -> Parser a
-spacey f = space *> f <* space
-
 parseSource :: Parser Source
 parseSource = uncurry Source <$> itemList src watch
 
   where
     src = do
-      u <- lexeme "src" *> auri
-      pl <- option MQTT311 (try prot)
-      (lwtt,lwtm) <- option (Nothing, Nothing) (try plwt)
+      u <- lexeme "src" *> lexeme auri
+      pl <- option MQTT311 (try (lexeme prot))
+      (lwtt,lwtm) <- option (Nothing, Nothing) plwt
       pure (u, pl, lwtt, lwtm)
 
     auri :: Parser URI
@@ -68,7 +64,7 @@ parseSource = uncurry Source <$> itemList src watch
 
     watch = Watch . pack <$> (lexeme "watch" *> lexeme qstr) <*> (lexeme time <* lexeme "->") <*> pact
 
-    prot = spacey (MQTT5 <$ "mqtt5")
+    prot = MQTT5 <$ "mqtt5"
 
     qstr = between "\"" "\"" (some $ noneOf ['"'])
            <|> between "'" "'" (some $ noneOf ['\''])
@@ -78,26 +74,20 @@ parseSource = uncurry Source <$> itemList src watch
       m <- seconds <$ "s" <|> minutes <$ "m" <|> hours <$ "h" <|> pure seconds
       pure (m b)
 
-    plwt :: Parser (Maybe Text, Maybe BL.ByteString)
     plwt = do
-      topic <- space *> qstr
-      msg <- space *> qstr
+      topic <- lexeme qstr
+      msg <- qstr
       pure (Just (pack topic), Just (BU.fromString msg))
 
     pact :: Parser Action
-    pact = try actAlert <|> actSet <|> actDelete
+    pact = actAlert <|> actSet <|> actDelete
       where
-        actAlert = do
-          dests <- "alert" *> ((space *> word) `sepBy` ",")
-          pure $ ActAlert dests
+        actAlert = ActAlert <$> (lexeme "alert" *> (lexeme word `sepBy` ","))
         actSet = do
-          t <- "set" *> spacey qstr
-          m <- spacey qstr
-          r <- pbool
-          pure $ ActSet (pack t) (BU.fromString m) r
+          t <- lexeme "set" *> lexeme qstr
+          m <- lexeme qstr
+          ActSet (pack t) (BU.fromString m) <$> pbool
         actDelete = ActDelete <$ "delete"
-
-        pbool :: Parser Bool
         pbool = True <$ "True" <|> False <$ "False"
 
     millis = (* 1000)
@@ -106,15 +96,9 @@ parseSource = uncurry Source <$> itemList src watch
     hours = minutes . (* 60)
 
 parsePushoverConf :: Parser PushoverConf
-parsePushoverConf = do
-  (p, us) <- itemList pushover user
-  pure $ PushoverConf p (Map.fromList us)
-
+parsePushoverConf = uncurry PushoverConf . fmap Map.fromList <$> itemList pushover user
   where
-    pushover :: Parser Text
     pushover = pack <$> ("dest pushover " *> some (noneOf ['\n']))
-
-    user :: Parser (Text,Text)
     user = (,) <$> lexeme word <*> word
 
 word :: Parser Text
