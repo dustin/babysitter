@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE TupleSections     #-}
 
 module Main where
 
@@ -12,12 +13,9 @@ import           Control.Monad              (forever, void, when)
 import           Control.Monad.Catch        (bracket, catch)
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (withRunInIO)
-import           Control.Monad.Logger       (LogLevel (..), LoggingT,
-                                             MonadLogger, ToLogStr (..),
-                                             logWithoutLoc, runStderrLoggingT,
-                                             toLogStr)
-import           Control.Monad.Reader       (MonadReader, ReaderT (..), asks,
-                                             runReaderT)
+import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, ToLogStr (..), logWithoutLoc,
+                                             runStderrLoggingT, toLogStr)
+import           Control.Monad.Reader       (MonadReader, ReaderT (..), asks, runReaderT)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.HashMap.Strict        (HashMap)
@@ -27,23 +25,17 @@ import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, fromMaybe)
 import           Data.String                (fromString)
-import           Data.Text                  (Text, concat, intercalate,
-                                             isInfixOf, isSuffixOf, pack,
-                                             unpack)
+import           Data.Text                  (Text, concat, intercalate, isInfixOf, isSuffixOf, pack, unpack)
 import qualified Data.Text.Encoding         as TE
 import           Data.Time
 import qualified Data.Vector                as V
 import           Database.InfluxDB          as IDB
-import           Network.API.Pushover       (message, sendMessage, _body,
-                                             _title)
+import           Network.API.Pushover       (_body, _title, message, sendMessage)
 import           Network.MQTT.Client
-import           Network.MQTT.Topic         (match)
+import           Network.MQTT.Topic         (Filter, match, mkTopic, unFilter, unTopic)
 import           Network.URI
-import           Options.Applicative        (Parser, auto, execParser, fullDesc,
-                                             help, helper, info, long,
-                                             maybeReader, option, progDesc,
-                                             showDefault, strOption, value,
-                                             (<**>))
+import           Options.Applicative        (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
+                                             option, progDesc, showDefault, strOption, value, (<**>))
 import           UnliftIO.Async             (mapConcurrently_)
 import           UnliftIO.Timeout           (timeout)
 
@@ -88,6 +80,9 @@ askPushoverConf = asks pushoverConf
 askOpts :: MonadReader Env m => m Options
 askOpts = asks cliOpts
 
+instance ToLogStr Topic where
+  toLogStr = toLogStr . unTopic
+
 timedout :: PushoverConf -> Action -> MQTTClient -> Event -> Text -> Babysitter ()
 
 -- Setting values.
@@ -103,9 +98,11 @@ timedout _ ActDelete mc ev topic = do
   logInfo $ unpack topic <> " - " <> show ev <> " -> delete"
   to ev
     where
-      to TimedOut = do
-        logInfo $ "deleting " <> unpack topic <> " after timeout"
-        liftIO $ publishq mc topic "" True QoS2 mempty
+      to TimedOut = case mkTopic topic of
+                      Nothing -> pure ()
+                      Just t -> do
+                        logInfo $ "deleting " <> unpack topic <> " after timeout"
+                        liftIO $ publishq mc t "" True QoS2 mempty
       to _        = pure ()
 
 -- Alerting via pushover.
@@ -126,7 +123,7 @@ timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
 
       users' = map (umap Map.!) users
 
-withMQTT :: URI -> Protocol -> Maybe Text -> Maybe BL.ByteString -> (MQTTClient -> Text -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> Babysitter ()
+withMQTT :: URI -> Protocol -> Maybe Topic -> Maybe BL.ByteString -> (MQTTClient -> Topic -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> Babysitter ()
 withMQTT u pl mlwtt mlwtm cb f = withRunInIO $ \unl -> bracket connto normalDisconnect (go unl)
 
   where
@@ -160,7 +157,7 @@ logDbg = logAt LevelDebug
 delay :: MonadIO m => Int -> m ()
 delay = liftIO . threadDelay
 
-alertNow :: [Watch] -> Text -> Text -> Babysitter ()
+alertNow :: [Watch a] -> Text -> Text -> Babysitter ()
 alertNow insts t m = do
   logInfo $ mconcat ["Instant alert: ", show users, " ", show t, ", ", show m]
   (PushoverConf tok um) <- askPushoverConf
@@ -173,8 +170,8 @@ alertNow insts t m = do
       ufunc _                        = []
       findUsers umap = map (umap Map.!) users
 
-runMQTTWatcher :: Source -> Babysitter ()
-runMQTTWatcher (Source (u,pl,mlwtt,mlwtm) watches) = do
+runMQTTWatcher :: (URI, Protocol, Maybe Topic, Maybe BL.ByteString) -> [Watch Filter] -> Babysitter ()
+runMQTTWatcher (u,pl,mlwtt,mlwtm) watches = do
   pc <- askPushoverConf
   let (instant, timeouts) = partition (\(Watch _ i _) -> i == 0) watches
       toThings = map (\(Watch t i action) -> (t, (i, timedout pc action))) timeouts
@@ -193,25 +190,26 @@ runMQTTWatcher (Source (u,pl,mlwtt,mlwtm) watches) = do
     where
       gotMsg _ _ _ _ "" _ = pure ()
       gotMsg unl (wd, instant) c t m _
-        | instMatch = unl $ alertNow insts t (TE.decodeUtf8 . BL.toStrict $ m)
-        | otherwise = unl $ feed wd t c
+        | instMatch = unl $ alertNow insts (unTopic t) (TE.decodeUtf8 . BL.toStrict $ m)
+        | otherwise = unl $ feed wd (unTopic t) c
         where
           insts = filter (\(Watch x _ _) -> x `match` t) instant
           instMatch = (not . null) insts
 
-      bestMatch [] t = error $ "no good match for " <> unpack t
+      bestMatch [] t = error $ "no good match for " <> show t
       bestMatch ((x,r):xs) t
-        | x `match` t = r
+        | x `match` (fromString . unpack) t = r
         | otherwise = bestMatch xs t
       -- Feed all the non-wildcarded watches to the watch dog so
       -- timeouts are meaningful from zero state.
       feedStartup _ _ [] = pure ()
       feedStartup wd mc (Watch t i _:xs)
-        | i == 0             = feedStartup wd mc xs
-        | "#" `isSuffixOf` t = feedStartup wd mc xs
-        | "+/" `isInfixOf` t = feedStartup wd mc xs
-        | "/+" `isInfixOf` t = feedStartup wd mc xs
-        | otherwise          = feed wd t mc >> feedStartup wd mc xs
+        | i == 0              = feedStartup wd mc xs
+        | "#" `isSuffixOf` t' = feedStartup wd mc xs
+        | "+/" `isInfixOf` t' = feedStartup wd mc xs
+        | "/+" `isInfixOf` t' = feedStartup wd mc xs
+        | otherwise           = feed wd t' mc >> feedStartup wd mc xs
+        where t' = unFilter t
 
       subAndWait unl things mc = unl $ do
         logInfo $ mconcat ["Subscribing at ", show u, " - ", show [(t,subOptions{_subQoS=QoS2}) | (t,_) <- things]]
@@ -226,8 +224,8 @@ instance QueryResults TSOnly where
 
 data Status = Clear | Alerting deriving(Eq, Show)
 
-runInfluxWatcher :: Source -> Babysitter ()
-runInfluxWatcher (Source (u,_,_,_) watches) = do
+runInfluxWatcher :: URI -> [Watch Text] -> Babysitter ()
+runInfluxWatcher u watches = do
   let uauth = fromMaybe (error "bad url auth") $ uriAuthority u
       h = uriRegName uauth
       dbname = drop 1 $ uriPath u
@@ -241,17 +239,17 @@ runInfluxWatcher (Source (u,_,_,_) watches) = do
       delay (seconds 60)
       periodically st' f
 
-    watchAll :: QueryParams -> [Watch] -> Map Text Status -> Babysitter (Map Text Status)
+    watchAll :: QueryParams -> [Watch Text] -> Map Text Status -> Babysitter (Map Text Status)
     watchAll qp ws m = Map.fromList . Prelude.concat <$> traverse watchOne ws
       where
-        watchOne :: Watch -> Babysitter [(Text,Status)]
+        watchOne :: Watch Text -> Babysitter [(Text,Status)]
         watchOne w@(Watch t _ _) = do
           let q = fromString . unpack $ t
           r <- liftIO (IDB.query qp q :: IO (V.Vector TSOnly))
           now <- liftIO getCurrentTime
           traverse (maybeAlert w now) (V.toList r)
 
-        maybeAlert :: Watch -> UTCTime -> TSOnly -> Babysitter (Text, Status)
+        maybeAlert :: Watch Text -> UTCTime -> TSOnly -> Babysitter (Text, Status)
         maybeAlert (Watch t i act) now (TSOnly x tags) = do
           let age = truncate $ diffUTCTime now x
               firing = seconds age > i
@@ -271,13 +269,8 @@ runInfluxWatcher (Source (u,_,_,_) watches) = do
                                           "]"]
 
 runWatcher :: Source -> Babysitter ()
-runWatcher src@(Source (u,_,_,_) _)
-  | isMQTT = runMQTTWatcher src
-  | isInflux = (optDelaySeconds <$> askOpts) >>= delay >> runInfluxWatcher src
-  | otherwise = fail ("Don't know how to watch: " <> show u)
-
-  where isMQTT = uriScheme u `elem` ["mqtt:", "mqtts:"]
-        isInflux = uriScheme u == "influx:"
+runWatcher (MQTTSource x ws)   = runMQTTWatcher x ws
+runWatcher (InfluxSource u ws) = (optDelaySeconds <$> askOpts) >>= delay >> runInfluxWatcher u ws
 
 runTrans :: PushoverConf -> Options -> ReaderT Env m a -> m a
 runTrans pc opts f = runReaderT f (Env pc opts)
