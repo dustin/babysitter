@@ -6,38 +6,37 @@
 
 module Main where
 
-import           Control.Concurrent         (threadDelay)
-import           Control.Exception          (SomeException)
-import           Control.Lens               ((&), (.~))
-import           Control.Monad              (forever, void, when)
-import           Control.Monad.Catch        (bracket, catch)
-import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.IO.Unlift    (withRunInIO)
-import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, ToLogStr (..), logWithoutLoc,
-                                             runStderrLoggingT, toLogStr)
-import           Control.Monad.Reader       (MonadReader, ReaderT (..), asks, runReaderT)
-import qualified Data.ByteString.Lazy       as BL
-import qualified Data.ByteString.Lazy.Char8 as BC
-import           Data.HashMap.Strict        (HashMap)
-import qualified Data.HashMap.Strict        as HM
-import           Data.List                  (partition)
-import           Data.Map.Strict            (Map)
-import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust, fromMaybe)
-import           Data.String                (fromString)
-import           Data.Text                  (Text, concat, intercalate, isInfixOf, isSuffixOf, pack, unpack)
-import qualified Data.Text.Encoding         as TE
+import           Control.Concurrent      (threadDelay)
+import           Control.Exception       (SomeException)
+import           Control.Lens            ((&), (.~))
+import           Control.Monad           (forever, void, when)
+import           Control.Monad.Catch     (bracket, catch)
+import           Control.Monad.IO.Class  (MonadIO (..))
+import           Control.Monad.IO.Unlift (withRunInIO)
+import           Control.Monad.Logger    (LogLevel (..), LoggingT, MonadLogger, ToLogStr (..), logWithoutLoc,
+                                          runStderrLoggingT, toLogStr)
+import           Control.Monad.Reader    (MonadReader, ReaderT (..), asks, runReaderT)
+import qualified Data.ByteString.Lazy    as BL
+import           Data.HashMap.Strict     (HashMap)
+import qualified Data.HashMap.Strict     as HM
+import           Data.List               (partition)
+import           Data.Map.Strict         (Map)
+import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (fromJust, fromMaybe)
+import           Data.String             (fromString)
+import           Data.Text               (Text, concat, intercalate, isInfixOf, isSuffixOf, unpack)
+import qualified Data.Text.Encoding      as TE
 import           Data.Time
-import qualified Data.Vector                as V
-import           Database.InfluxDB          as IDB
-import           Network.API.Pushover       (_body, _title, message, sendMessage)
+import qualified Data.Vector             as V
+import           Database.InfluxDB       as IDB
+import           Network.API.Pushover    (_body, _title, message, sendMessage)
 import           Network.MQTT.Client
-import           Network.MQTT.Topic         (Filter, match, mkTopic, unFilter, unTopic)
+import           Network.MQTT.Topic      (Filter, match, mkTopic, unFilter, unTopic)
 import           Network.URI
-import           Options.Applicative        (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
-                                             option, progDesc, showDefault, strOption, value, (<**>))
-import           UnliftIO.Async             (mapConcurrently_)
-import           UnliftIO.Timeout           (timeout)
+import           Options.Applicative     (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
+                                          option, progDesc, showDefault, strOption, value, (<**>))
+import           UnliftIO.Async          (mapConcurrently_)
+import           UnliftIO.Timeout        (timeout)
 
 
 import           Babyconf
@@ -45,27 +44,19 @@ import           Babysitter
 
 data Options = Options {
   optMQTTURL         :: URI
-  , optMQTTLWTTopic  :: Maybe Text
-  , optMQTTLWTMsg    :: Maybe BL.ByteString
   , optPushoverToken :: Text
   , optPushoverUser  :: Text
-  , optConfFile      :: String
+  , optConfFile      :: FilePath
   , optDelaySeconds  :: Int
   }
 
 options :: Parser Options
 options = Options
   <$> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://test.mosquitto.org/#babysitter") <> help "mqtt broker URI")
-  <*> option mt (long "mqtt-lwt-topic" <> showDefault <> value Nothing <> help "mqtt last will topic")
-  <*> option mb (long "mqtt-lwt-msg" <> showDefault <> value Nothing <> help "mqtt last will message")
   <*> strOption (long "pushover-token" <> showDefault <> value "" <> help "pushover token")
   <*> strOption (long "pushover-user" <> showDefault <> value "" <> help "pushover user")
   <*> strOption (long "conf" <> showDefault <> value "baby.conf" <> help "config file")
   <*> option auto (long "delay" <> value 0 <> help "seconds to wait before starting influx watcher")
-
-  where
-    mt = maybeReader $ pure.pure.pack
-    mb = maybeReader $ pure.pure . BC.pack
 
 data Env = Env {
   pushoverConf :: PushoverConf
