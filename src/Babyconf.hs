@@ -3,7 +3,7 @@
 
 module Babyconf (parseConfFile, Protocol(..), Babyconf(..), Source(..), Watch(..), Action(..), PushoverConf(..)) where
 
-import           Control.Applicative        ((<|>))
+import           Control.Applicative        (empty, (<|>))
 import           Control.Monad              (when)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.UTF8  as BU
@@ -14,7 +14,7 @@ import           Data.Text                  (Text, pack)
 import           Data.Void                  (Void)
 import           Network.MQTT.Topic
 import           Text.Megaparsec            (Parsec, between, eof, noneOf, option, parse, sepBy, some, try)
-import           Text.Megaparsec.Char       (alphaNumChar, space, space1)
+import           Text.Megaparsec.Char       (alphaNumChar, hspace1, space, space1)
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Text.Megaparsec.Error      (errorBundlePretty)
 
@@ -40,12 +40,14 @@ data Watch t = Watch t Int Action deriving(Show, Eq)
 
 data PushoverConf = PushoverConf Text (Map Text Text) deriving(Show, Eq)
 
-sc :: Parser ()
-sc = L.space space1 (L.skipLineComment "#" <* space) (L.skipBlockComment "/*" "*/")
+comment :: Parser ()
+comment = L.skipLineComment "#" <* space
 
+sc :: Parser ()
+sc = L.space space1 comment empty
 
 lexeme :: Parser a -> Parser a
-lexeme = L.lexeme sc
+lexeme = L.lexeme (L.space hspace1 comment empty)
 
 parseBabyconf :: Parser Babyconf
 parseBabyconf = Babyconf <$> lexeme parsePushoverConf <*> some parseSource <* eof

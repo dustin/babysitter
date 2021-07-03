@@ -73,6 +73,7 @@ testReturn = do
 testConfig :: Assertion
 testConfig = do
   let Just u = parseURI "mqtt://test.mosquitto.org/#babysittertest"
+      Just u2 = parseURI "mqtt://test.mosquitto.org/#babysitter2"
       Just iu = parseURI "influx://host:8086/dbname"
   c <- parseConfFile "test/test.conf"
   assertEqual "test.conf" (Babyconf (PushoverConf "pushoverapikey"
@@ -81,6 +82,8 @@ testConfig = do
                                      Just "babysitter \226\152\160")
                               [Watch "tmp/#" 300000000 ActDelete,
                                Watch "x/+/y" 1800000000 (ActAlert ["dustin"])],
+                             MQTTSource (u2, MQTT311, Nothing, Nothing)
+                              [Watch "tmp/#" 60000000 ActDelete],
                              InfluxSource iu
                               [Watch "select last(thing) from stuff" 3600000000 (ActAlert ["dustin"])]
                               ]) c
