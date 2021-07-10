@@ -76,17 +76,16 @@ testConfig = do
       Just u2 = parseURI "mqtt://test.mosquitto.org/#babysitter2"
       Just iu = parseURI "influx://host:8086/dbname"
   c <- parseConfFile "test/test.conf"
-  assertEqual "test.conf" (Babyconf (PushoverConf "pushoverapikey"
-                                     (Map.fromList [("dustin","mypushoverkey")]))
-                            [MQTTSource (u, MQTT5, Just "errors",
-                                     Just "babysitter \226\152\160")
-                              [Watch "tmp/#" 300000000 ActDelete,
+  assertEqual "test.conf" (Babyconf (Map.fromList [("dustin", Pushover "pushoverapikey" "mypushoverkey")])
+                           [MQTTSource (u, MQTT5, Just "errors",
+                                        Just "babysitter \226\152\160")
+                             [Watch "tmp/#" 300000000 ActDelete,
                                Watch "x/+/y" 1800000000 (ActAlert ["dustin"])],
                              MQTTSource (u2, MQTT311, Nothing, Nothing)
                               [Watch "tmp/#" 60000000 ActDelete],
                              InfluxSource iu
                               [Watch "select last(thing) from stuff" 3600000000 (ActAlert ["dustin"])]
-                              ]) c
+                           ]) c
 
 tests :: [TestTree]
 tests = [

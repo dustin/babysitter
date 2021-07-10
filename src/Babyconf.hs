@@ -1,12 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
 
-module Babyconf (parseConfFile, Protocol(..), Babyconf(..), Source(..), Watch(..), Action(..), PushoverConf(..)) where
+module Babyconf (parseConfFile, Protocol(..), Babyconf(..), Source(..), Watch(..), Action(..), Destinations, Destination(..)) where
 
 import           Control.Applicative        (empty, (<|>))
 import           Control.Monad              (when)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.UTF8  as BU
+import           Data.Foldable              (fold)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.String                (fromString)
@@ -22,9 +23,18 @@ import           Network.URI
 
 type Parser = Parsec Void Text
 
-data Babyconf = Babyconf PushoverConf [Source] deriving(Show, Eq)
+type Destinations = Map Text Destination
+
+data Babyconf = Babyconf Destinations [Source] deriving(Show, Eq)
+
+instance Semigroup Babyconf where
+  Babyconf d1 s1 <> Babyconf d2 s2 = Babyconf (d1 <> d2) (s1 <> s2)
+
+instance Monoid Babyconf where mempty = Babyconf mempty mempty
 
 data Protocol = MQTT311 | MQTT5 deriving (Show, Eq)
+
+data Destination = Pushover Text Text deriving (Show, Eq)
 
 data Source = MQTTSource (URI, Protocol, Maybe Topic, Maybe BL.ByteString) [Watch Filter]
             | InfluxSource URI [Watch Text]
@@ -38,8 +48,6 @@ data Action = ActAlert [Text]
 
 data Watch t = Watch t Int Action deriving(Show, Eq)
 
-data PushoverConf = PushoverConf Text (Map Text Text) deriving(Show, Eq)
-
 comment :: Parser ()
 comment = L.skipLineComment "#" <* space
 
@@ -50,13 +58,16 @@ lexeme :: Parser a -> Parser a
 lexeme = L.lexeme (L.space hspace1 comment empty)
 
 parseBabyconf :: Parser Babyconf
-parseBabyconf = Babyconf <$> lexeme parsePushoverConf <*> some parseSource <* eof
+parseBabyconf = fold <$> some parseSection <* eof
 
-parseSource :: Parser Source
+parseSection :: Parser Babyconf
+parseSection = parseDest <|> parseSource
+
+parseSource :: Parser Babyconf
 parseSource = L.nonIndented sc src
 
   where
-    src = try mqttSrc <|> influxSrc
+    src = Babyconf mempty . (:[]) <$> (try mqttSrc <|> influxSrc)
 
     mqttSrc = uncurry MQTTSource <$> itemList ms (watch aFilter)
       where
@@ -109,9 +120,12 @@ parseSource = L.nonIndented sc src
     minutes = seconds . (* 60)
     hours = minutes . (* 60)
 
-parsePushoverConf :: Parser PushoverConf
-parsePushoverConf = uncurry PushoverConf . fmap Map.fromList <$> itemList pushover user
+parseDest :: Parser Babyconf
+parseDest = Babyconf <$> pc <*> pure mempty
   where
+    pc = do
+      (k, m) <- itemList pushover user
+      pure $ Map.fromList [(u, Pushover k v) | (u, v) <- m]
     pushover = pack <$> ("dest pushover " *> some (noneOf ['\n']))
     user = (,) <$> lexeme word <*> word
 

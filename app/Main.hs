@@ -29,7 +29,7 @@ import qualified Data.Text.Encoding      as TE
 import           Data.Time
 import qualified Data.Vector             as V
 import           Database.InfluxDB       as IDB
-import           Network.API.Pushover    (_body, _title, message, sendMessage)
+import           Network.API.Pushover    (_title, message, sendMessage)
 import           Network.MQTT.Client
 import           Network.MQTT.Topic      (Filter, match, mkTopic, unFilter, unTopic)
 import           Network.URI
@@ -59,14 +59,14 @@ options = Options
   <*> option auto (long "delay" <> value 0 <> help "seconds to wait before starting influx watcher")
 
 data Env = Env {
-  pushoverConf :: PushoverConf
+  destinations :: Destinations
   , cliOpts    :: Options
   }
 
 type Babysitter = ReaderT Env (LoggingT IO)
 
-askPushoverConf :: MonadReader Env m => m PushoverConf
-askPushoverConf = asks pushoverConf
+askDestinations :: MonadReader Env m => m Destinations
+askDestinations = asks destinations
 
 askOpts :: MonadReader Env m => m Options
 askOpts = asks cliOpts
@@ -74,7 +74,12 @@ askOpts = asks cliOpts
 instance ToLogStr Topic where
   toLogStr = toLogStr . unTopic
 
-timedout :: PushoverConf -> Action -> MQTTClient -> Event -> Text -> Babysitter ()
+notify :: Destination -> Text -> Text -> Babysitter ()
+notify (Pushover tok usr) title body =
+  let m = (message tok usr body) {_title=title} in
+    void . liftIO $ sendMessage m
+
+timedout :: Destinations -> Action -> MQTTClient -> Event -> Text -> Babysitter ()
 
 -- Setting values.
 timedout _ (ActSet t m r) mc ev topic = do
@@ -97,20 +102,14 @@ timedout _ ActDelete mc ev topic = do
       to _        = pure ()
 
 -- Alerting via pushover.
-timedout (PushoverConf tok umap) (ActAlert users) _ ev topic = do
+timedout umap (ActAlert users) _ ev topic = do
   logInfo $ unpack topic <> " - " <> show ev <> " -> " <> show users
   to ev
 
     where
-      to TimedOut =
-        mapM_ (\usr -> let m = (message tok usr (topic <> " timed out"))
-                               {_title="Babysitter:  Timed Out"} in
-                         void $ liftIO $ sendMessage m) users'
-      to Returned =
-        mapM_ (\usr -> let m = (message tok usr (topic <> " came back"))
-                               {_title="Babysitter:  Came Back"} in
-                         void $ liftIO $ sendMessage m) users'
-      to _ = pure ()
+      to TimedOut = mapM_ (\d -> notify d "Babysitter:  Timed Out" (topic <> " timed out")) users'
+      to Returned = mapM_ (\d -> notify d "Babysitter:  Came Back" (topic <> " came back")) users'
+      to _        = pure ()
 
       users' = map (umap Map.!) users
 
@@ -151,10 +150,8 @@ delay = liftIO . threadDelay
 alertNow :: [Watch a] -> Text -> Text -> Babysitter ()
 alertNow insts t m = do
   logInfo $ mconcat ["Instant alert: ", show users, " ", show t, ", ", show m]
-  (PushoverConf tok um) <- askPushoverConf
-  let dests = findUsers um
-  mapM_ (\usr -> let msg = (message tok usr t){_title="Babysitter Now: " <> t, _body=m} in
-            void $ liftIO $ sendMessage msg) dests
+  dests <- findUsers <$> askDestinations
+  mapM_ (\d -> notify d ("Babysitter Now: " <> t) m) dests
     where
       users = concatMap ufunc insts
       ufunc (Watch _ _ (ActAlert x)) = x
@@ -163,10 +160,10 @@ alertNow insts t m = do
 
 runMQTTWatcher :: (URI, Protocol, Maybe Topic, Maybe BL.ByteString) -> [Watch Filter] -> Babysitter ()
 runMQTTWatcher (u,pl,mlwtt,mlwtm) watches = do
-  pc <- askPushoverConf
+  ds <- askDestinations
   let (instant, timeouts) = partition (\(Watch _ i _) -> i == 0) watches
-      toThings = map (\(Watch t i action) -> (t, (i, timedout pc action))) timeouts
-      allThings = map (\(Watch t i action) -> (t, (i, timedout pc action))) watches
+      toThings = map (\(Watch t i action) -> (t, (i, timedout ds action))) timeouts
+      allThings = map (\(Watch t i action) -> (t, (i, timedout ds action))) watches
   wd <- liftIO $ mkWatchDogs (bestMatch toThings)
   feedStartup wd undefined timeouts
 
@@ -248,8 +245,8 @@ runInfluxWatcher u watches = do
               ev = if newst == Alerting then TimedOut else Returned
               msg = if null tags then t else (t <> tagstr tags)
               shouldAlert = firing == (Map.findWithDefault Clear msg m == Clear)
-          pc <- askPushoverConf
-          when shouldAlert $ timedout pc act undefined ev msg
+          ds <- askDestinations
+          when shouldAlert $ timedout ds act undefined ev msg
           pure $ (msg, newst)
 
         tagstr :: HashMap Text Text -> Text
@@ -263,8 +260,8 @@ runWatcher :: Source -> Babysitter ()
 runWatcher (MQTTSource x ws)   = runMQTTWatcher x ws
 runWatcher (InfluxSource u ws) = (optDelaySeconds <$> askOpts) >>= delay >> runInfluxWatcher u ws
 
-runTrans :: PushoverConf -> Options -> ReaderT Env m a -> m a
-runTrans pc opts f = runReaderT f (Env pc opts)
+runTrans :: Destinations -> Options -> ReaderT Env m a -> m a
+runTrans ds opts f = runReaderT f (Env ds opts)
 
 run :: Options -> IO ()
 run opts@Options{..} = do
