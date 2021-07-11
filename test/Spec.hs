@@ -15,6 +15,7 @@ import           Test.Tasty.QuickCheck  as QC
 
 import           Babyconf
 import           Babysitter
+import           Babysitter.Types
 
 testWatchDoggin :: Assertion
 testWatchDoggin = do
@@ -76,7 +77,10 @@ testConfig = do
       Just u2 = parseURI "mqtt://test.mosquitto.org/#babysitter2"
       Just iu = parseURI "influx://host:8086/dbname"
   c <- parseConfFile "test/test.conf"
-  assertEqual "test.conf" (Babyconf (Map.fromList [("dustin", Pushover "pushoverapikey" "mypushoverkey")])
+  assertEqual "test.conf" (Babyconf (Map.fromList [
+                                        ("dustin", Pushover "pushoverapikey" "mypushoverkey"),
+                                        ("dpager", PagerDuty "servicekey")
+                                        ])
                            [MQTTSource (u, MQTT5, Just "errors",
                                         Just "babysitter \226\152\160")
                              [Watch "tmp/#" 300000000 ActDelete,

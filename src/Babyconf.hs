@@ -34,7 +34,9 @@ instance Monoid Babyconf where mempty = Babyconf mempty mempty
 
 data Protocol = MQTT311 | MQTT5 deriving (Show, Eq)
 
-data Destination = Pushover Text Text deriving (Show, Eq)
+data Destination = Pushover Text Text
+                 | PagerDuty Text
+                 deriving (Show, Eq)
 
 data Source = MQTTSource (URI, Protocol, Maybe Topic, Maybe BL.ByteString) [Watch Filter]
             | InfluxSource URI [Watch Text]
@@ -121,13 +123,21 @@ parseSource = L.nonIndented sc src
     hours = minutes . (* 60)
 
 parseDest :: Parser Babyconf
-parseDest = Babyconf <$> pc <*> pure mempty
+parseDest = Babyconf <$> (pushover <|> pagerduty) <*> pure mempty
   where
-    pc = do
-      (k, m) <- itemList pushover user
+    pushover = do
+      (k, m) <- itemList hdr user
       pure $ Map.fromList [(u, Pushover k v) | (u, v) <- m]
-    pushover = pack <$> ("dest pushover " *> some (noneOf ['\n']))
-    user = (,) <$> lexeme word <*> word
+        where
+          hdr = pack <$> ("dest pushover " *> some (noneOf ['\n']))
+          user = (,) <$> lexeme word <*> word
+
+    pagerduty = do
+      (k, m) <- itemList hdr user
+      pure $ Map.fromList [(u, PagerDuty k) | u <- m]
+        where
+          hdr = pack <$> ("dest pagerduty " *> some (noneOf ['\n']))
+          user = lexeme word
 
 word :: Parser Text
 word = pack <$> some alphaNumChar

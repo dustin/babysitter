@@ -13,7 +13,7 @@ import           Control.Monad           (forever, void, when)
 import           Control.Monad.Catch     (bracket, catch)
 import           Control.Monad.IO.Class  (MonadIO (..))
 import           Control.Monad.IO.Unlift (withRunInIO)
-import           Control.Monad.Logger    (LogLevel (..), LoggingT, MonadLogger, ToLogStr (..), logWithoutLoc,
+import           Control.Monad.Logger    (LoggingT, ToLogStr (..),
                                           runStderrLoggingT, toLogStr)
 import           Control.Monad.Reader    (MonadReader, ReaderT (..), asks, runReaderT)
 import qualified Data.ByteString.Lazy    as BL
@@ -25,11 +25,9 @@ import qualified Data.Map.Strict         as Map
 import           Data.Maybe              (fromJust, fromMaybe)
 import           Data.String             (fromString)
 import           Data.Text               (Text, concat, intercalate, isInfixOf, isSuffixOf, unpack)
-import qualified Data.Text.Encoding      as TE
 import           Data.Time
 import qualified Data.Vector             as V
 import           Database.InfluxDB       as IDB
-import           Network.API.Pushover    (_title, message, sendMessage)
 import           Network.MQTT.Client
 import           Network.MQTT.Topic      (Filter, match, mkTopic, unFilter, unTopic)
 import           Network.URI
@@ -41,6 +39,9 @@ import           UnliftIO.Timeout        (timeout)
 
 import           Babyconf
 import           Babysitter
+import           Babysitter.Notification
+import           Babysitter.Types
+import           Babysitter.Logging
 
 data Options = Options {
   optMQTTURL         :: URI
@@ -74,11 +75,6 @@ askOpts = asks cliOpts
 instance ToLogStr Topic where
   toLogStr = toLogStr . unTopic
 
-notify :: Destination -> Text -> Text -> Babysitter ()
-notify (Pushover tok usr) title body =
-  let m = (message tok usr body) {_title=title} in
-    void . liftIO $ sendMessage m
-
 timedout :: Destinations -> Action -> MQTTClient -> Event -> Text -> Babysitter ()
 
 -- Setting values.
@@ -104,13 +100,9 @@ timedout _ ActDelete mc ev topic = do
 -- Alerting via pushover.
 timedout umap (ActAlert users) _ ev topic = do
   logInfo $ unpack topic <> " - " <> show ev <> " -> " <> show users
-  to ev
+  when (ev /= Created) $ mapM_ (\d -> notify ev d topic) users'
 
     where
-      to TimedOut = mapM_ (\d -> notify d "Babysitter:  Timed Out" (topic <> " timed out")) users'
-      to Returned = mapM_ (\d -> notify d "Babysitter:  Came Back" (topic <> " came back")) users'
-      to _        = pure ()
-
       users' = map (umap Map.!) users
 
 withMQTT :: URI -> Protocol -> Maybe Topic -> Maybe BL.ByteString -> (MQTTClient -> Topic -> BL.ByteString -> [Property] -> IO ()) -> (MQTTClient -> IO ()) -> Babysitter ()
@@ -132,26 +124,14 @@ withMQTT u pl mlwtt mlwtm cb f = withRunInIO $ \unl -> bracket connto normalDisc
       r <- waitForClient mc
       void . unl . logInfo $ mconcat ["Disconnected from ", show u, " ", show r]
 
-logAt :: (MonadLogger m, ToLogStr msg) => LogLevel -> msg -> m ()
-logAt l = logWithoutLoc "" l . toLogStr
-
-logErr :: (MonadLogger m, ToLogStr msg) => msg -> m ()
-logErr = logAt LevelError
-
-logInfo :: (MonadLogger m, ToLogStr msg) => msg -> m ()
-logInfo = logAt LevelInfo
-
-logDbg :: (MonadLogger m, ToLogStr msg) => msg -> m ()
-logDbg = logAt LevelDebug
-
 delay :: MonadIO m => Int -> m ()
 delay = liftIO . threadDelay
 
-alertNow :: [Watch a] -> Text -> Text -> Babysitter ()
-alertNow insts t m = do
-  logInfo $ mconcat ["Instant alert: ", show users, " ", show t, ", ", show m]
+alertNow :: [Watch a] -> Text -> Babysitter ()
+alertNow insts t = do
+  logInfo $ mconcat ["Instant alert: ", show users, " ", show t]
   dests <- findUsers <$> askDestinations
-  mapM_ (\d -> notify d ("Babysitter Now: " <> t) m) dests
+  mapM_ (\d -> notify TimedOut d t) dests
     where
       users = concatMap ufunc insts
       ufunc (Watch _ _ (ActAlert x)) = x
@@ -177,8 +157,8 @@ runMQTTWatcher (u,pl,mlwtt,mlwtm) watches = do
 
     where
       gotMsg _ _ _ _ "" _ = pure ()
-      gotMsg unl (wd, instant) c t m _
-        | instMatch = unl $ alertNow insts (unTopic t) (TE.decodeUtf8 . BL.toStrict $ m)
+      gotMsg unl (wd, instant) c t _ _
+        | instMatch = unl $ alertNow insts (unTopic t)
         | otherwise = unl $ feed wd (unTopic t) c
         where
           insts = filter (\(Watch x _ _) -> x `match` t) instant

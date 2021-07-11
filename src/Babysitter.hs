@@ -1,8 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Babysitter (
-  AlertFun, WatchDogs, mkWatchDogs, feed, heel,
-  Event(..),
+  WatchDogs, mkWatchDogs, feed, heel,
   -- * Convenience functions
   millis, seconds, minutes,
   ) where
@@ -19,7 +18,7 @@ import           Data.Set                 (Set)
 import qualified Data.Set                 as Set
 import           System.Timeout           (timeout)
 
-type AlertFun a b m = b -> Event -> a -> m ()
+import           Babysitter.Types
 
 type Watchers a b m = Map a (Async (), TChan (), AlertFun a b m)
 
@@ -30,8 +29,6 @@ data WatchDogs a b m = WatchDogs {
   , _st   :: State a b m
   , _seen :: TVar (Set a)
   }
-
-data Event = Created | Returned | TimedOut deriving (Eq, Show)
 
 mkWatchDogs :: Ord a => (a -> (Int, AlertFun a b m)) -> IO (WatchDogs a b m)
 mkWatchDogs _cfgFor = WatchDogs _cfgFor <$> newTVarIO mempty <*> newTVarIO mempty
