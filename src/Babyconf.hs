@@ -4,14 +4,16 @@
 module Babyconf (parseConfFile, Protocol(..), Babyconf(..), Source(..), Watch(..), Action(..), Destinations, Destination(..)) where
 
 import           Control.Applicative        (empty, (<|>))
-import           Control.Monad              (when)
+import           Control.Monad              (unless, when)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.UTF8  as BU
 import           Data.Foldable              (fold)
+import           Data.List                  (intercalate)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
+import qualified Data.Set                   as Set
 import           Data.String                (fromString)
-import           Data.Text                  (Text, pack)
+import           Data.Text                  (Text, pack, unpack)
 import           Data.Void                  (Void)
 import           Network.MQTT.Topic
 import           Text.Megaparsec            (Parsec, between, eof, noneOf, option, parse, sepBy, some, try)
@@ -42,7 +44,6 @@ data Source = MQTTSource (URI, Protocol, Maybe Topic, Maybe BL.ByteString) [Watc
             | InfluxSource URI [Watch Text]
   deriving(Show, Eq)
 
-
 data Action = ActAlert [Text]
             | ActSet Topic BL.ByteString Bool
             | ActDelete
@@ -60,7 +61,22 @@ lexeme :: Parser a -> Parser a
 lexeme = L.lexeme (L.space hspace1 comment empty)
 
 parseBabyconf :: Parser Babyconf
-parseBabyconf = fold <$> some parseSection <* eof
+parseBabyconf = do
+  c@(Babyconf ds ws) <- fold <$> some parseSection <* eof
+  let wanted = Set.fromList (foldMap watches ws)
+      missing = wanted `Set.difference` Map.keysSet ds
+  unless (null missing) $ fail ("unknown alert destinations: "
+                                <> intercalate ", " (fmap unpack (Set.toList missing)))
+  pure c
+
+  where
+    watches (MQTTSource _ ws)   = watchers ws
+    watches (InfluxSource _ ws) = watchers ws
+
+    watchers = foldMap w
+      where
+        w (Watch _ _ (ActAlert l)) = l
+        w _                        = []
 
 parseSection :: Parser Babyconf
 parseSection = parseDest <|> parseSource
