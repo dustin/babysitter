@@ -25,6 +25,7 @@ dependencies:
 - megaparsec
 - text
 - pushover-hs
+- pagerduty-hs
 - net-mqtt >= 0.8
 - containers
 - unordered-containers

@@ -22,6 +22,13 @@ packages:
       sha256: 839dcd69a478c4746b9f8739bc27243540efcf82a528739e0335081c7c50106a
   original:
     hackage: net-mqtt-0.8.0.2
+- completed:
+    hackage: pagerduty-hs-0.1.0.1@sha256:00913e4ede5bc6b572b58e9f5b2b605687ebaea4baf0dc36ce2a5a8a3a09d2e9,1687
+    pantry-tree:
+      size: 384
+      sha256: 9a172125132b983a4c09a65b7e07983e670afe4229409dc1c2f907880a8c6bdd
+  original:
+    hackage: pagerduty-hs-0.1.0.1
 snapshots:
 - completed:
     size: 585393

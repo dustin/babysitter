@@ -45,6 +45,7 @@ extra-deps:
 - git: https://github.com/dustin/pushover-hs.git
   commit: 1fc03e4459e55afb7a064f95484dae024953faee
 - net-mqtt-0.8.0.2
+- pagerduty-hs-0.1.0.1
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
