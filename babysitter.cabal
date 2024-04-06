@@ -51,7 +51,7 @@ library
     , net-mqtt >=0.8
     , network-uri
     , optparse-applicative
-    , pagerduty-hs
+    , pagerduty-hs >= 0.3
     , pushover-hs
     , stm
     , text
@@ -127,7 +127,7 @@ test-suite babysitter-test
     , net-mqtt >=0.8
     , network-uri
     , optparse-applicative
-    , pagerduty-hs
+    , pagerduty-hs >= 0.3
     , pushover-hs
     , stm
     , tasty

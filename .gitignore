@@ -1,3 +1,6 @@
 *~
 .stack-work/
 /TAGS
+.direnv/
+dist-newstyle/
+.DS_Store
