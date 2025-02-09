@@ -17,7 +17,7 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: lts-18.0
+resolver: lts-22.27
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -44,8 +44,7 @@ extra-deps:
 # - /Users/dsal/prog/mqtt
 - git: https://github.com/dustin/pushover-hs.git
   commit: 1fc03e4459e55afb7a064f95484dae024953faee
-- net-mqtt-0.8.0.2
-- pagerduty-hs-0.1.0.1
+- pagerduty-hs-0.3.0.0@sha256:e9f53b2c2b8d2ebd7434bc57997452feac3150d9c6b1a384c5907952b6957232  
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

@@ -5,33 +5,26 @@
 
 packages:
 - completed:
+    commit: 1fc03e4459e55afb7a064f95484dae024953faee
+    git: https://github.com/dustin/pushover-hs.git
     name: pushover-hs
-    version: 0.1.0.0
-    git: https://github.com/dustin/pushover-hs.git
     pantry-tree:
-      size: 469
       sha256: e4b768f60a0c7788608f093f661a1f22422a6656c80d4c46bd552bcc9665c9da
-    commit: 1fc03e4459e55afb7a064f95484dae024953faee
+      size: 469
+    version: 0.1.0.0
   original:
+    commit: 1fc03e4459e55afb7a064f95484dae024953faee
     git: https://github.com/dustin/pushover-hs.git
-    commit: 1fc03e4459e55afb7a064f95484dae024953faee
 - completed:
-    hackage: net-mqtt-0.8.0.2@sha256:def2fa42d89763550c758a2b367e54d3b23f1f9202c6e0fff8798f04b92f5333,4146
+    hackage: pagerduty-hs-0.3.0.0@sha256:e9f53b2c2b8d2ebd7434bc57997452feac3150d9c6b1a384c5907952b6957232,1729
     pantry-tree:
-      size: 701
-      sha256: 839dcd69a478c4746b9f8739bc27243540efcf82a528739e0335081c7c50106a
+      sha256: bcfb7d63c0dc15f4fb0313e298cd5ee413a4406cea743254a1a436d4175f7163
+      size: 466
   original:
-    hackage: net-mqtt-0.8.0.2
-- completed:
-    hackage: pagerduty-hs-0.1.0.1@sha256:00913e4ede5bc6b572b58e9f5b2b605687ebaea4baf0dc36ce2a5a8a3a09d2e9,1687
-    pantry-tree:
-      size: 384
-      sha256: 9a172125132b983a4c09a65b7e07983e670afe4229409dc1c2f907880a8c6bdd
-  original:
-    hackage: pagerduty-hs-0.1.0.1
+    hackage: pagerduty-hs-0.3.0.0@sha256:e9f53b2c2b8d2ebd7434bc57997452feac3150d9c6b1a384c5907952b6957232
 snapshots:
 - completed:
-    size: 585393
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/18/0.yaml
-    sha256: c632012da648385b9fa3c29f4e0afd56ead299f1c5528ee789058be410e883c0
-  original: lts-18.0
+    sha256: bc144ddf301a5c99f2cf51c7de50279ba144fd4486cb3c66f87ed761d6bbf6e9
+    size: 719131
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/22/27.yaml
+  original: lts-22.27

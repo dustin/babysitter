@@ -4,3 +4,4 @@
 .direnv/
 dist-newstyle/
 .DS_Store
+/test.conf
