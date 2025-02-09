@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y zlib1g zlib1g-dev
 
 WORKDIR /usr/src/app
 
-COPY babysitter.cabal ./
+COPY cabal.project babysitter.cabal ./
 RUN cabal update && cabal build --only-dependencies
 
 COPY . ./
