@@ -1,7 +1,8 @@
 *~
-.stack-work/
 /TAGS
 .direnv/
 dist-newstyle/
+/result
+/result-*
 .DS_Store
 /test.conf

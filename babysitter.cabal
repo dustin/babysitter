@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.34.4.
+-- This file has been generated from package.yaml by hpack version 0.38.3.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: bc4b856161ed1e36b6eebbd83af6cf32679abb85ae88d34ec12f5f784f0ed09c
+-- hash: 15ac49abc9ed571bcc31bd6c80bc3320b5a3f4fced9bba6ccb0f07b84beaac14
 
 name:           babysitter
 version:        0.1.0.0
@@ -48,10 +48,10 @@ library
     , lens
     , megaparsec
     , monad-logger
-    , net-mqtt >=0.8
+    , net-mqtt >=0.8.8.0 && <0.9
     , network-uri
     , optparse-applicative
-    , pagerduty-hs >= 0.3
+    , pagerduty-hs >=0.3
     , pushover-hs
     , stm
     , text
@@ -85,10 +85,10 @@ executable babysitter
     , megaparsec
     , monad-logger
     , mtl
-    , net-mqtt >=0.8
+    , net-mqtt >=0.8.8.0 && <0.9
     , network-uri
     , optparse-applicative
-    , pagerduty-hs
+    , pagerduty-hs >=0.3
     , pushover-hs
     , stm
     , text
@@ -124,10 +124,10 @@ test-suite babysitter-test
     , lens
     , megaparsec
     , monad-logger
-    , net-mqtt >=0.8
+    , net-mqtt >=0.8.8.0 && <0.9
     , network-uri
     , optparse-applicative
-    , pagerduty-hs >= 0.3
+    , pagerduty-hs >=0.3
     , pushover-hs
     , stm
     , tasty

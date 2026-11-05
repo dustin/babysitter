@@ -25,8 +25,8 @@ dependencies:
 - megaparsec
 - text
 - pushover-hs
-- pagerduty-hs
-- net-mqtt >= 0.8
+- pagerduty-hs >= 0.3
+- net-mqtt >= 0.8.8.0 && < 0.9
 - containers
 - unordered-containers
 - async
