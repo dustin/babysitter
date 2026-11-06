@@ -4,7 +4,9 @@ import           Control.Concurrent     (threadDelay)
 import           Control.Concurrent.STM (TChan, TVar, atomically, modifyTVar', newTChan, newTChanIO, newTVarIO,
                                          readTChan, readTVar, readTVarIO, retry, writeTChan, writeTVar)
 import           Control.Monad          (foldM_)
+import           Data.Aeson             (object, (.=))
 import qualified Data.Map.Strict        as Map
+import           Data.Text              (Text)
 import           Data.Void              (Void)
 import           Network.URI
 
@@ -15,6 +17,7 @@ import           Test.Tasty.QuickCheck  as QC
 
 import           Babyconf
 import           Babysitter
+import           Babysitter.Notification (hookshotPayload)
 import           Babysitter.Types
 
 testWatchDoggin :: Assertion
@@ -71,15 +74,22 @@ testReturn = do
     tod _ rv _ Returned t = (atomically $ modifyTVar' rv succ)
     tod _ _ _ e t         = pure ()
 
+testHookshotPayload :: Assertion
+testHookshotPayload = assertEqual "Hookshot JSON"
+  (object ["text" .= ("tmp/thing timed out" :: Text), "username" .= ("Babysitter" :: Text)])
+  (hookshotPayload TimedOut "tmp/thing")
+
 testConfig :: Assertion
 testConfig = do
   let Just u = parseURI "mqtt://test.mosquitto.org/#babysittertest"
       Just u2 = parseURI "mqtt://test.mosquitto.org/#babysitter2"
       Just iu = parseURI "influx://host:8086/dbname"
+      Just hu = parseURI "https://hookshot.example.org/webhook/secret"
   c <- parseConfFile "test/test.conf"
   assertEqual "test.conf" (Babyconf (Map.fromList [
                                         ("dustin", Pushover "pushoverapikey" "mypushoverkey"),
-                                        ("dpager", PagerDuty "servicekey")
+                                        ("dpager", PagerDuty "servicekey"),
+                                        ("matrix", Hookshot hu)
                                         ])
                            [MQTTSource (u, MQTT5, Just "errors",
                                         Just "babysitter \226\152\160")
@@ -96,7 +106,8 @@ tests = [
   tmout $ testCase "watchdog firing" testWatchDoggin,
   tmout $ testCase "watchdog heeling" testHeelin,
   tmout $ testCase "return of the watchdog" testReturn,
-  testCase "test.conf" testConfig
+  testCase "test.conf" testConfig,
+  testCase "hookshot payload" testHookshotPayload
   ]
 
   where tmout = localOption (Timeout 5000000 "5s")

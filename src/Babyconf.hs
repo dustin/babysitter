@@ -38,6 +38,7 @@ data Protocol = MQTT311 | MQTT5 deriving (Show, Eq)
 
 data Destination = Pushover Text Text
                  | PagerDuty Text
+                 | Hookshot URI
                  deriving (Show, Eq)
 
 data Source = MQTTSource (URI, Protocol, Maybe Topic, Maybe BL.ByteString) [Watch Filter]
@@ -81,6 +82,14 @@ parseBabyconf = do
 parseSection :: Parser Babyconf
 parseSection = parseDest <|> parseSource
 
+auri :: [String] -> Parser URI
+auri schemes = do
+  ustr <- some (noneOf ['\n', ' '])
+  u <- maybe (fail "bad url") pure (parseURI ustr)
+  let sch = uriScheme u
+  when (sch `notElem` schemes) $ fail ("invalid scheme: " <> show sch)
+  pure u
+
 parseSource :: Parser Babyconf
 parseSource = L.nonIndented sc src
 
@@ -99,14 +108,6 @@ parseSource = L.nonIndented sc src
       where is = lexeme "src" *> auri ["influx:"]
 
     watch p = Watch <$> (lexeme "watch" *> lexeme p) <*> (lexeme time <* lexeme "->") <*> pact
-
-    auri :: [String] -> Parser URI
-    auri schemes = do
-      ustr <- some (noneOf ['\n', ' '])
-      u <- maybe (fail "bad url") pure (parseURI ustr)
-      let sch = uriScheme u
-      when (sch `notElem` schemes) $ fail ("invalid scheme: " <> show sch)
-      pure u
 
     prot = MQTT5 <$ "mqtt5"
 
@@ -139,7 +140,7 @@ parseSource = L.nonIndented sc src
     hours = minutes . (* 60)
 
 parseDest :: Parser Babyconf
-parseDest = Babyconf <$> (pushover <|> pagerduty) <*> pure mempty
+parseDest = Babyconf <$> (pushover <|> pagerduty <|> hookshot) <*> pure mempty
   where
     pushover = do
       (k, m) <- itemList hdr user
@@ -154,6 +155,12 @@ parseDest = Babyconf <$> (pushover <|> pagerduty) <*> pure mempty
         where
           hdr = pack <$> ("dest pagerduty " *> some (noneOf ['\n']))
           user = lexeme word
+
+    hookshot = do
+      (_, m) <- itemList "dest hookshot" destination
+      pure $ Map.fromList [(u, Hookshot uri) | (u, uri) <- m]
+        where
+          destination = (,) <$> lexeme word <*> lexeme (auri ["http:", "https:"])
 
 word :: Parser Text
 word = pack <$> some alphaNumChar
